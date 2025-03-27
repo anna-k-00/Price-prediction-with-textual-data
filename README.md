@@ -8,6 +8,7 @@ Code implementation procedure
   from parser_avito import AvitoParser
   
   parser = AvitoParser()
+  
   parser.initializer(target_types = ['dom','dacha',cottage],df_path='data_new_house.csv') 
 
 
