@@ -3,10 +3,9 @@
 Code implementation procedure
 
 # 1. Parsing
-
-  from parser_avito import AvitoParser
-  
   example of usage
+  
+  from parser_avito import AvitoParser
   
   parser = AvitoParser()
   parser.initializer(target_types = ['dom','dacha',cottage],df_path='data_new_house.csv') 
