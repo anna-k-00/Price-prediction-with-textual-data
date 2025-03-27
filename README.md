@@ -46,6 +46,7 @@ Code implementation procedure
  by importing these methods and calling final initiation loop (or single experiment) depending on model chosen and parameters to test for this model
   
  models available for testing for now:
+     
      - NN (custom one)
      - XGBoost
      - LSVR 
@@ -55,6 +56,7 @@ Code implementation procedure
 
   
   embedding generation techniques available for testing for now:
+  
     - fine-tuned RuBERT tiny
     - Word2Vec
     - TF-IDF
