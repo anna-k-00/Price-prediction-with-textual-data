@@ -35,12 +35,12 @@ from mlflow.tracking import MlflowClient
 # from content.drive.MyDrive.thesis.Transformers.tfidf_transformer import TfidfTransformer
 # from content.drive.MyDrive.thesis.Transformers.w2v_ztransformer import  Word2VecTransformer
 # from content.drive.MyDrive.thesis.Transformers.rubert_transformer import  RuBertTiny2Embedder
-from tfidf_transformer import TfidfTransformer
-from w2v_transformer import Word2VecTransformer
-from rubert_transformer import RuBertTiny2Embedder
+from embeddings_generation.tfidf_transformer import TfidfTransformer
+from embeddings_generation.w2v_transformer import Word2VecTransformer
+from embeddings_generation.rubert_transformer import RuBertTiny2Embedder
 
-# from exp_setting import ANNRegressor
-# from exp_setting import PricePredictionExperiment
+from exp_setting import ANNRegressor
+from exp_setting import PricePredictionExperiment
 
 
 tuples = [('text-only','tfidf'),('text-only','w2v'),('text-only','rubert'),('mixed','tfidf'),('mixed','w2v'),('mixed','rubert'),('categorical-only','tfidf')]
