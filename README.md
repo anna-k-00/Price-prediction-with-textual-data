@@ -44,12 +44,19 @@ Code implementation procedure
  initialize testing with script from alike experiment_initiation_rf or similar ones
 
  by importing these methods and calling final initiation loop (or single experiment) depending on model chosen and parameters to test for this model
+
+
   
   from embeddings_generation.tfidf_transformer import TfidfTransformer
+  
   from embeddings_generation.w2v_transformer import Word2VecTransformer
+  
   from embeddings_generation.rubert_transformer import RuBertTiny2Embedder
+  
   from exp_setting import ANNRegressor
+  
   from exp_setting import PricePredictionExperiment
+
 
   
  models available for testing for now:
