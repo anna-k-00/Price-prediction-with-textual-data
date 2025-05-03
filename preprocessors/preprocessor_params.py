@@ -7,16 +7,14 @@ from sklearn.preprocessing import StandardScaler, LabelEncoder, MinMaxScaler
 import re
 
 class DataProcessingPipeline:
-    def __init__(self, df, norm_needed=True, log_needed=True, one_hot_only=True, train=True, outlier_bounds=None):
+    def __init__(self, df, norm_needed=True, log_needed=True, one_hot_only=True, 
+                 train=True, outlier_bounds=None, scaler=None, lat_long_scaler=None):
         self.df = df
         self.norm_needed = norm_needed
-        self.log_needed = norm_needed
+        self.log_needed = log_needed
         self.one_hot_only = one_hot_only
-        self.label_encoders = None
-        self.scaler = None
-        self.lat_long_scaler = None
-        self.train = train  # Флаг для режима обучения/применения
-        self.outlier_bounds = outlier_bounds if outlier_bounds else {}  # Границы выбросов для применения
+        self.train = train
+        self.outlier_bounds = outlier_bounds if outlier_bounds else {}
         self.fitted_outlier_bounds = None
         self.scaler = scaler  # Добавляем параметр для скалера
         self.lat_long_scaler = lat_long_scaler  # Добавляем параметр для скалера координат
