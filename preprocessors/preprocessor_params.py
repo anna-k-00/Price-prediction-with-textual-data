@@ -209,25 +209,50 @@ class DataProcessingPipeline:
         return self.df
 
     def prepare_for_model(self):
-        """
-        Подготовка данных для модели: удаление выбросов + нормализация
-        Возвращает обработанный DataFrame и параметры трансформаций (для тестовых данных)
-        """
-        if self.train == True:
+        """Подготовка данных для модели: удаление выбросов + нормализация"""
+        if self.train:
             self.df = self.remove_outliers(self.df, columns=['price', 'houseArea', 'landArea'])
         else:
-            self.df = self.remove_outliers(self.df, columns=['houseArea', 'landArea'])
+            self.df = self.remove_outliers(self.df, columns=['price', 'houseArea', 'landArea'])
         
         # Нормализация
         if self.norm_needed:
             if self.train:
-                # Для обучающих данных создаем новые скалеры
+                # Для обучающих данных создаем и обучаем новые скалеры
                 self.scaler = MinMaxScaler(feature_range=(0, 1))
                 self.lat_long_scaler = MinMaxScaler(feature_range=(-1, 1))
-            elif self.scaler is None or self.lat_long_scaler is None:
-                raise ValueError("In apply mode, scalers must be provided")
                 
-            self.df = self._apply_normalization(self.df)
+                # Выбираем колонки для нормализации
+                columns_to_normalize = ['houseArea', 'landArea', 'distanceFromMkad', 
+                                      'year', 'distanceToCityKm', 'price']
+                
+                # Обучаем скалеры
+                self.scaler.fit(self.df[columns_to_normalize])
+                self.lat_long_scaler.fit(self.df[['latitude', 'longitude']])
+                
+                # Применяем нормализацию
+                self.df[columns_to_normalize] = self.scaler.transform(self.df[columns_to_normalize])
+                self.df[['latitude', 'longitude']] = self.lat_long_scaler.transform(
+                    self.df[['latitude', 'longitude']]
+                )
+            else:
+                # Для тестовых данных используем предобученные скалеры
+                if self.scaler is None or self.lat_long_scaler is None:
+                    raise ValueError("In apply mode, scalers must be provided")
+                
+                columns_to_normalize = ['houseArea', 'landArea', 'distanceFromMkad', 
+                                      'year', 'distanceToCityKm', 'price']
+                
+                self.df[columns_to_normalize] = self.scaler.transform(self.df[columns_to_normalize])
+                self.df[['latitude', 'longitude']] = self.lat_long_scaler.transform(
+                    self.df[['latitude', 'longitude']]
+                )
+        
+        # Логарифмическое преобразование
+        if self.log_needed:
+            log_columns = ['houseArea', 'landArea', 'distanceFromMkad', 'distanceToCityKm', 'price']
+            for col in log_columns:
+                self.df[col] = np.log1p(self.df[col])
         
         if self.train:
             return {
