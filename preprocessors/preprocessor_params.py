@@ -18,6 +18,8 @@ class DataProcessingPipeline:
         self.train = train  # Флаг для режима обучения/применения
         self.outlier_bounds = outlier_bounds if outlier_bounds else {}  # Границы выбросов для применения
         self.fitted_outlier_bounds = None
+        self.scaler = scaler  # Добавляем параметр для скалера
+        self.lat_long_scaler = lat_long_scaler  # Добавляем параметр для скалера координат
         self.column_mapping = {
             'id': 'id',
             'Количество комнат': 'rooms',
