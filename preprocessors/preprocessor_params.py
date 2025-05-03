@@ -7,7 +7,7 @@ from sklearn.preprocessing import StandardScaler, LabelEncoder, MinMaxScaler
 import re
 
 class DataProcessingPipeline:
-    def __init__(self, df, norm_needed=True, log_needed=True, one_hot_only=True):
+    def __init__(self, df, norm_needed=True, log_needed=True, one_hot_only=True, train=True, outlier_bounds=None):
         self.df = df
         self.norm_needed = norm_needed
         self.log_needed = norm_needed
@@ -15,6 +15,9 @@ class DataProcessingPipeline:
         self.label_encoders = None
         self.scaler = None
         self.lat_long_scaler = None
+        self.train = train  # Флаг для режима обучения/применения
+        self.outlier_bounds = outlier_bounds if outlier_bounds else {}  # Границы выбросов для применения
+        self.fitted_outlier_bounds = None
         self.column_mapping = {
             'id': 'id',
             'Количество комнат': 'rooms',
@@ -172,6 +175,8 @@ class DataProcessingPipeline:
 
 
     def process_for_ml(self):
+        # description_data = self.df[['id', 'description']].set_index('id').copy()
+        
         # Step 1: Rename columns
         self.df.rename(columns=self.column_mapping, inplace=True)
 
@@ -191,7 +196,7 @@ class DataProcessingPipeline:
         # Step 6: Clean year of construction
         self.df = self.clean_year_of_construction(self.df)
 
-        # Step 7: Remove outliers
+        # Step 7: Remove outliers (теперь сохраняет или применяет границы)
         self.df = self.remove_outliers(self.df, columns=['price', 'houseArea', 'landArea'])
 
         # Step 8: Calculate nearest city and distance
@@ -206,6 +211,8 @@ class DataProcessingPipeline:
 
         # Step 10: Categorical replacements and conversions
         self.df, self.label_encoders = self.categorical_replacements_and_convertations(self.df)
+
+        # self.df = self.df.join(description_data)
 
         return self.df
 
@@ -243,7 +250,7 @@ class DataProcessingPipeline:
         for phrase in sale_methods_to_drop:
             df = df[~df['saleMethod'].str.contains(phrase, case=False, na=False)]
 
-        df = df.drop(columns=['utilities', 'distanceToCityCenter', 'description', 'address']).set_index(['id'])
+        df = df.drop(columns=['utilities', 'distanceToCityCenter', 'address']).set_index(['id'])
         df = df[df.landCategory != 'фермерское хозяйство']
         return df
 
@@ -351,21 +358,39 @@ class DataProcessingPipeline:
     def remove_outliers(self, df, columns, lower_percentile=0.001, upper_percentile=0.995):
         """
         Remove the lower and upper percentiles from multiple columns in a DataFrame.
+        In train mode: calculates and saves bounds
+        In apply mode: uses pre-calculated bounds
         """
-        # Calculate lower and upper bounds for all columns
-        bounds = {}
-        for column in columns:
-            lower_bound = df[column].quantile(lower_percentile)
-            upper_bound = df[column].quantile(upper_percentile)
-            bounds[column] = (lower_bound, upper_bound)
-        
-        # Filter the DataFrame based on the calculated bounds
-        mask = pd.Series(True, index=df.index)  # Initialize a mask with all True values
-        for column, (lower_bound, upper_bound) in bounds.items():
-            mask &= (df[column] >= lower_bound) & (df[column] <= upper_bound)
+        if self.train:
+            # Режим обучения - вычисляем границы
+            bounds = {}
+            for column in columns:
+                lower_bound = df[column].quantile(lower_percentile)
+                upper_bound = df[column].quantile(upper_percentile)
+                bounds[column] = (lower_bound, upper_bound)
+            
+            # Сохраняем вычисленные границы
+            self.fitted_outlier_bounds = bounds
+            
+            # Фильтруем данные
+            mask = pd.Series(True, index=df.index)
+            for column, (lower_bound, upper_bound) in bounds.items():
+                mask &= (df[column] >= lower_bound) & (df[column] <= upper_bound)
+        else:
+            # Режим применения - используем предварительно вычисленные границы
+            if not self.outlier_bounds:
+                raise ValueError("Outlier bounds must be provided in apply mode")
+            
+            mask = pd.Series(True, index=df.index)
+            for column in columns:
+                if column not in self.outlier_bounds:
+                    raise ValueError(f"No bounds provided for column: {column}")
+                
+                lower_bound, upper_bound = self.outlier_bounds[column]
+                mask &= (df[column] >= lower_bound) & (df[column] <= upper_bound)
         
         return df[mask]
-    
+        
     def nearest_city(self, latitude, longitude):
         min_distance = float("inf")
         nearestCity = None
@@ -415,7 +440,8 @@ class DataProcessingPipeline:
         
     def _update_object_columns(self, df):
         # Update object_columns
-        self.object_columns = list(df.select_dtypes(include=['object']).columns)
+        self.object_columns = [col for col in df.select_dtypes(include=['object']).columns 
+                         if col != 'description']
     
         # Update columns_with_commas
         self.columns_with_commas = [col for col in self.object_columns if df[col].str.contains(',').any()]
@@ -623,5 +649,3 @@ class DataProcessingPipeline:
             df['price'] = np.expm1(df['price'])
 
         return df
-     
-
