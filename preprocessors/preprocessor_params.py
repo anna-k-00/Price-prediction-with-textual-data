@@ -215,16 +215,22 @@ class DataProcessingPipeline:
         Подготовка данных для модели: удаление выбросов + нормализация
         Возвращает обработанный DataFrame и параметры трансформаций (для тестовых данных)
         """
-        if train == True:
+        if self.train = True:
             self.df = self.remove_outliers(self.df, columns=['price', 'houseArea', 'landArea'])
         else:
-            self.df = self.remove_outliers(self.df, columns=['price', 'houseArea', 'landArea'])
-            
+            self.df = self.remove_outliers(self.df, columns=['houseArea', 'landArea'])
         
         # Нормализация
-        self.df = self.normalization_logtransformation(self.df, self.norm_needed, self.log_needed)
+        if self.norm_needed:
+            if self.train:
+                # Для обучающих данных создаем новые скалеры
+                self.scaler = MinMaxScaler(feature_range=(0, 1))
+                self.lat_long_scaler = MinMaxScaler(feature_range=(-1, 1))
+            elif self.scaler is None or self.lat_long_scaler is None:
+                raise ValueError("In apply mode, scalers must be provided")
+                
+            self.df = self._apply_normalization(self.df)
         
-        # Возвращаем обработанные данные и параметры (если в режиме обучения)
         if self.train:
             return {
                 'processed_df': self.df,
