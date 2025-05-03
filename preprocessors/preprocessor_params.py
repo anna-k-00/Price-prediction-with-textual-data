@@ -213,8 +213,11 @@ class DataProcessingPipeline:
         Подготовка данных для модели: удаление выбросов + нормализация
         Возвращает обработанный DataFrame и параметры трансформаций (для тестовых данных)
         """
-        # Удаление выбросов
-        self.df = self.remove_outliers(self.df, columns=['price', 'houseArea', 'landArea'])
+        if train == True:
+            self.df = self.remove_outliers(self.df, columns=['price', 'houseArea', 'landArea'])
+        else:
+            self.df = self.remove_outliers(self.df, columns=['price', 'houseArea', 'landArea'])
+            
         
         # Нормализация
         self.df = self.normalization_logtransformation(self.df, self.norm_needed, self.log_needed)
