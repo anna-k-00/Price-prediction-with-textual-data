@@ -42,6 +42,7 @@ class DataProcessingPipeline:
             'address': 'address',
             'price': 'price',
             'description': 'description',
+            'description_raw': 'description_raw',
             'seller': 'seller',
             'category': 'category',
             'lat': 'latitude',
@@ -174,6 +175,61 @@ class DataProcessingPipeline:
             }
 
 
+    def preprocess_base(self):
+        """Базовые преобразования без нормализации и удаления выбросов"""
+        # Step 1: Rename columns
+        self.df.rename(columns=self.column_mapping, inplace=True)
+
+        # Step 2: Highway name restoring
+        self.df['nearestHighway'] = self.df['address'].apply(self.find_highway)
+        self.transformations['nearestHighway'] = {key: key for key in self.highways.values()}
+        
+        # Step 3: Drop rows
+        self.df = self.drop_rows(self.df)
+
+        # Step 4: Convert data types
+        self.df = self.convert_data_types(self.df)
+
+        # Step 5: Recalculate MKAD distance
+        self.df = self.distance_from_mkad(self.df)
+
+        # Step 6: Clean year of construction
+        self.df = self.clean_year_of_construction(self.df)
+
+        # Step 8: Calculate nearest city and distance
+        self.df = self.calculate_nearest_city(self.df)
+        self.transformations['nearestCity'] = {city['name']: city['name'] for city in self.cities}
+
+        # Additional step - make columns lists for further functions
+        self._update_object_columns(self.df)
+
+        # Step 10: Categorical replacements and conversions
+        self.df, self.label_encoders = self.categorical_replacements_and_convertations(self.df)
+
+        return self.df
+
+    def prepare_for_model(self):
+        """
+        Подготовка данных для модели: удаление выбросов + нормализация
+        Возвращает обработанный DataFrame и параметры трансформаций (для тестовых данных)
+        """
+        # Удаление выбросов
+        self.df = self.remove_outliers(self.df, columns=['price', 'houseArea', 'landArea'])
+        
+        # Нормализация
+        self.df = self.normalization_logtransformation(self.df, self.norm_needed, self.log_needed)
+        
+        # Возвращаем обработанные данные и параметры (если в режиме обучения)
+        if self.train:
+            return {
+                'processed_df': self.df,
+                'outlier_bounds': self.fitted_outlier_bounds,
+                'scaler': self.scaler,
+                'lat_long_scaler': self.lat_long_scaler
+            }
+        else:
+            return self.df
+        
     def process_for_ml(self):
         # description_data = self.df[['id', 'description']].set_index('id').copy()
         
@@ -245,7 +301,7 @@ class DataProcessingPipeline:
         sale_methods_to_drop = ['продажа доли', 'реализация на торгах']
 
         for phrase in description_phrases:
-            df = df[~df['description'].str.contains(phrase, case=False, na=False)]
+            df = df[~df['description_raw'].str.contains(phrase, case=False, na=False)]
 
         for phrase in sale_methods_to_drop:
             df = df[~df['saleMethod'].str.contains(phrase, case=False, na=False)]
@@ -441,7 +497,7 @@ class DataProcessingPipeline:
     def _update_object_columns(self, df):
         # Update object_columns
         self.object_columns = [col for col in df.select_dtypes(include=['object']).columns 
-                         if col != 'description']
+                         if col != 'description' and col != 'description_raw']
     
         # Update columns_with_commas
         self.columns_with_commas = [col for col in self.object_columns if df[col].str.contains(',').any()]
