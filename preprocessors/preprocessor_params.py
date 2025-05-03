@@ -240,6 +240,28 @@ class DataProcessingPipeline:
             }
         else:
             return self.df
+
+    def _apply_normalization(self, df):
+        """Применяет нормализацию к данным"""
+        if self.log_needed:
+            df['houseArea'] = np.log1p(df['houseArea'])
+            df['landArea'] = np.log1p(df['landArea'])
+            df['distanceFromMkad'] = np.log1p(df['distanceFromMkad'] + 1)
+            df['distanceToCityKm'] = np.log1p(df['distanceToCityKm'] + 1)
+            df['price'] = np.log1p(df['price'])
+    
+        if self.norm_needed and self.scaler is not None and self.lat_long_scaler is not None:
+            # Нормализация для числовых признаков
+            columns_to_normalize = ['houseArea', 'landArea', 'distanceFromMkad', 
+                                   'year', 'distanceToCityKm', 'price']
+            df[columns_to_normalize] = self.scaler.transform(df[columns_to_normalize])
+            
+            # Нормализация для координат
+            df[['latitude', 'longitude']] = self.lat_long_scaler.transform(
+                df[['latitude', 'longitude']]
+            )
+        
+        return df
         
     def process_for_ml(self):
         # description_data = self.df[['id', 'description']].set_index('id').copy()
