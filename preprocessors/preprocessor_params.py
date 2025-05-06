@@ -8,7 +8,8 @@ import re
 
 class DataProcessingPipeline:
     def __init__(self, df, norm_needed=True, log_needed=True, one_hot_only=True, 
-                 train=True, outlier_bounds=None, scaler=None, lat_long_scaler=None):
+                 train=True, outlier_bounds=None, scaler=None, lat_long_scaler=None, 
+                 price_scaler=None):
         self.df = df
         self.norm_needed = norm_needed
         self.log_needed = log_needed
@@ -17,6 +18,7 @@ class DataProcessingPipeline:
         self.outlier_bounds = outlier_bounds if outlier_bounds else {}
         self.fitted_outlier_bounds = None
         self.scaler = scaler  # Добавляем параметр для скалера
+        self.price_scaler = price_scaler  # Добавляем новый атрибут
         self.lat_long_scaler = lat_long_scaler  # Добавляем параметр для скалера координат
         self.column_mapping = {
             'id': 'id',
@@ -224,16 +226,21 @@ class DataProcessingPipeline:
         
         # Нормализация (если нужно)
         if self.norm_needed:
-            columns_to_normalize = ['houseArea', 'landArea', 'distanceFromMkad', 
-                                  'year', 'distanceToCityKm', 'price']
+            # Основные признаки (кроме цены)
+            features_to_normalize = ['houseArea', 'landArea', 'distanceFromMkad', 
+                                   'year', 'distanceToCityKm']
             
             if self.train:
                 # Для обучающих данных - создаем и обучаем скалеры
                 self.scaler = MinMaxScaler(feature_range=(0, 1))
+                self.price_scaler = MinMaxScaler(feature_range=(0, 1))  # Отдельный scaler для цен
                 self.lat_long_scaler = MinMaxScaler(feature_range=(-1, 1))
                 
-                # Обучаем и применяем нормализацию для числовых признаков
-                self.df[columns_to_normalize] = self.scaler.fit_transform(self.df[columns_to_normalize])
+                # Обучаем и применяем нормализацию для числовых признаков (кроме цены)
+                self.df[features_to_normalize] = self.scaler.fit_transform(self.df[features_to_normalize])
+                
+                # Обучаем и применяем нормализацию для цен
+                self.df[['price']] = self.price_scaler.fit_transform(self.df[['price']])
                 
                 # Обучаем и применяем нормализацию для координат
                 self.df[['latitude', 'longitude']] = self.lat_long_scaler.fit_transform(
@@ -241,11 +248,15 @@ class DataProcessingPipeline:
                 )
             else:
                 # Для тестовых данных - проверяем наличие скалеров
-                if self.scaler is None or self.lat_long_scaler is None:
-                    raise ValueError("Для тестовых данных необходимо передать обученные скалеры")
+                if (self.scaler is None or self.lat_long_scaler is None 
+                    or self.price_scaler is None):
+                    raise ValueError("Для тестовых данных необходимо передать все обученные скалеры")
                 
-                # Применяем нормализацию для числовых признаков
-                self.df[columns_to_normalize] = self.scaler.transform(self.df[columns_to_normalize])
+                # Применяем нормализацию для числовых признаков (кроме цены)
+                self.df[features_to_normalize] = self.scaler.transform(self.df[features_to_normalize])
+                
+                # Применяем нормализацию для цен
+                self.df[['price']] = self.price_scaler.transform(self.df[['price']])
                 
                 # Применяем нормализацию для координат
                 self.df[['latitude', 'longitude']] = self.lat_long_scaler.transform(
@@ -258,6 +269,7 @@ class DataProcessingPipeline:
                 'processed_df': self.df,
                 'outlier_bounds': self.fitted_outlier_bounds,
                 'scaler': self.scaler,
+                'price_scaler': self.price_scaler,  # Добавляем в возвращаемый словарь
                 'lat_long_scaler': self.lat_long_scaler
             }
         else:
