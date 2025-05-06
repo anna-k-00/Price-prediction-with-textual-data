@@ -478,7 +478,7 @@ class DataProcessingPipeline:
         # integer_columns.append('yearIsNull')
 
     
-    def remove_outliers(self, df, columns, lower_percentile=0.01, upper_percentile=0.99):
+    def remove_outliers(self, df, columns, lower_percentile=0.001, upper_percentile=0.999):
         """
         Remove the lower and upper percentiles from multiple columns in a DataFrame.
         In train mode: calculates and saves bounds
