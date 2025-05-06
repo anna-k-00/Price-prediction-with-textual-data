@@ -212,9 +212,9 @@ class DataProcessingPipeline:
         """Подготовка данных для модели: удаление выбросов + нормализация"""
         # Удаление выбросов
         if self.train:
-            self.df = self.remove_outliers(self.df, columns=['houseArea', 'landArea'])
+            self.df = self.remove_outliers(self.df, columns=['price','houseArea', 'landArea'])
         else:
-            self.df = self.remove_outliers(self.df, columns=['houseArea', 'landArea'])
+            self.df = self.remove_outliers(self.df, columns=['price','houseArea', 'landArea'])
         
         # Логарифмическое преобразование (если нужно)
         if self.log_needed:
@@ -466,7 +466,7 @@ class DataProcessingPipeline:
         # integer_columns.append('yearIsNull')
 
     
-    def remove_outliers(self, df, columns, lower_percentile=0.001, upper_percentile=0.995):
+    def remove_outliers(self, df, columns, lower_percentile=0.001, upper_percentile=0.99):
         """
         Remove the lower and upper percentiles from multiple columns in a DataFrame.
         In train mode: calculates and saves bounds
