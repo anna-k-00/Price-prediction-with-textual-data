@@ -212,9 +212,9 @@ class DataProcessingPipeline:
         """Подготовка данных для модели: удаление выбросов + нормализация"""
         # Удаление выбросов
         if self.train:
-            self.df = self.remove_outliers(self.df, columns=['price','houseArea', 'landArea'])
+            self.df = self.remove_outliers(self.df, columns=['houseArea', 'landArea'])
         else:
-            self.df = self.remove_outliers(self.df, columns=['price','houseArea', 'landArea'])
+            self.df = self.remove_outliers(self.df, columns=['houseArea', 'landArea'])
         
         # Логарифмическое преобразование (если нужно)
         if self.log_needed:
