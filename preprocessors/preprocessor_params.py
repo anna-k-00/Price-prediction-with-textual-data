@@ -212,9 +212,9 @@ class DataProcessingPipeline:
         """Подготовка данных для модели: удаление выбросов + нормализация"""
         # Удаление выбросов
         if self.train:
-            self.df = self.remove_outliers(self.df, columns=['houseArea', 'landArea'])
+            self.df = self.mark_outliers(self.df, columns=['houseArea', 'landArea'])
         else:
-            self.df = self.remove_outliers(self.df, columns=['houseArea', 'landArea'])
+            self.df = self.mark_outliers(self.df, columns=['houseArea', 'landArea'])
         
         # Логарифмическое преобразование (если нужно)
         if self.log_needed:
@@ -466,41 +466,30 @@ class DataProcessingPipeline:
         # integer_columns.append('yearIsNull')
 
     
-    def remove_outliers(self, df, columns, lower_percentile=0.001, upper_percentile=0.99):
+    def mark_outliers(self, df, columns, lower_percentile=0.0001, upper_percentile=0.999):
         """
-        Remove the lower and upper percentiles from multiple columns in a DataFrame.
-        In train mode: calculates and saves bounds
-        In apply mode: uses pre-calculated bounds
+        Добавляет колонки is_<column>_outlier для указанных признаков.
+        В режиме train вычисляет и сохраняет границы.
+        В режиме test использует сохранённые границы.
         """
         if self.train:
             # Режим обучения - вычисляем границы
-            bounds = {}
+            self.fitted_outlier_bounds = {}
             for column in columns:
                 lower_bound = df[column].quantile(lower_percentile)
                 upper_bound = df[column].quantile(upper_percentile)
-                bounds[column] = (lower_bound, upper_bound)
-            
-            # Сохраняем вычисленные границы
-            self.fitted_outlier_bounds = bounds
-            
-            # Фильтруем данные
-            mask = pd.Series(True, index=df.index)
-            for column, (lower_bound, upper_bound) in bounds.items():
-                mask &= (df[column] >= lower_bound) & (df[column] <= upper_bound)
-        else:
-            # Режим применения - используем предварительно вычисленные границы
-            if not self.outlier_bounds:
-                raise ValueError("Outlier bounds must be provided in apply mode")
-            
-            mask = pd.Series(True, index=df.index)
-            for column in columns:
-                if column not in self.outlier_bounds:
-                    raise ValueError(f"No bounds provided for column: {column}")
-                
-                lower_bound, upper_bound = self.outlier_bounds[column]
-                mask &= (df[column] >= lower_bound) & (df[column] <= upper_bound)
+                self.fitted_outlier_bounds[column] = (lower_bound, upper_bound)
         
-        return df[mask]
+        # Проверяем, что границы загружены (в режиме test)
+        elif not hasattr(self, 'fitted_outlier_bounds'):
+            raise ValueError("Outlier bounds must be fitted in train mode first!")
+        
+        # Добавляем колонки-флаги для каждой переменной
+        for column in columns:
+            lower_bound, upper_bound = self.fitted_outlier_bounds[column]
+            df[f'is_{column}_outlier'] = (df[column] < lower_bound) | (df[column] > upper_bound)
+        
+        return df
         
     def nearest_city(self, latitude, longitude):
         min_distance = float("inf")
