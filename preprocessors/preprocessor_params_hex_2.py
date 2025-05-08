@@ -728,24 +728,24 @@ class DataProcessingPipeline:
         if not self.use_hex_features:
             return df
     
-        # 1. Создаем гексагоны для всех объектов (оригинальный df)
+        # 1. Создаем гексагоны для всех объектов
         df['hex_id'] = df.apply(
             lambda row: h3.latlng_to_cell(row['latitude'], row['longitude'], self.hex_resolution),
             axis=1
         )
         
-        # 2. Фильтрация строк без outlier-флагов (если колонки существуют)
+        # 2. Расчет количества объектов в каждом гексагоне (для всего датасета)
+        hex_counts = df['hex_id'].value_counts()
+        df['hex_property_count'] = df['hex_id'].map(hex_counts)
+    
+        # 3. Фильтрация строк без outlier-флагов (если колонки существуют)
         outlier_cols = [col for col in df.columns if col.startswith('is_') and col.endswith('_outlier')]
         if outlier_cols:
             df_clean = df[~df[outlier_cols].any(axis=1)].copy()
         else:
             df_clean = df.copy()
-        
-        # 3. Расчет количества объектов в каждом гексагоне (оригинальный df)
-        hex_counts = df['hex_id'].value_counts()
-        df['hex_property_count'] = df['hex_id'].map(hex_counts)
     
-        # 4. Расчет статистик (только на train, используем df_clean)
+        # 4. Расчет статистик (только на train)
         if self.train:
             # Расчет price/sqm и price/land (на чистых данных)
             df_clean['price_per_sqm'] = np.where(
@@ -769,7 +769,7 @@ class DataProcessingPipeline:
             'price': 'median',
             'houseArea': 'median',
             'landArea': 'median',
-            'hex_property_count': 'first'  # Берем из оригинального df
+            'hex_property_count': 'first'  # Используем колонку из основного df
         })
         hex_stats.columns = [
             'hex_price_median',
@@ -778,7 +778,8 @@ class DataProcessingPipeline:
             'hex_property_count'
         ]
     
-        # 6. Производные метрики (заполняем пропуски глобальными медианами)
+        # Остальной код остается без изменений...
+        # 6. Производные метрики
         hex_stats['hex_price_per_sqm'] = (
             hex_stats['hex_price_median'] / 
             hex_stats['hex_median_house_area'].replace(0, np.nan)
@@ -789,12 +790,12 @@ class DataProcessingPipeline:
             hex_stats['hex_median_land_area'].replace(0, np.nan)
         ).fillna(self.global_median_ppland if hasattr(self, 'global_median_ppland') else np.nan)
     
-        # 7. Обработка соседей (игнорируем outlier-гексагоны)
+        # 7. Обработка соседей
         neighbor_stats = []
         for hex_id in hex_stats.index:
             current_count = hex_stats.loc[hex_id, 'hex_property_count']
             neighbors = h3.grid_disk(hex_id, 1)
-            neighbors = [n for n in neighbors if n != hex_id and n in hex_stats.index]  # Только "чистые" гексагоны
+            neighbors = [n for n in neighbors if n != hex_id and n in hex_stats.index]
     
             if neighbors:
                 neighbor_data = hex_stats.loc[neighbors]
@@ -824,7 +825,7 @@ class DataProcessingPipeline:
         neighbor_stats_df = pd.DataFrame(neighbor_stats).set_index('hex_id')
         hex_stats = hex_stats.join(neighbor_stats_df)
     
-        # 8. Сохраняем hex_stats для теста (без outlier-гексагонов)
+        # 8. Сохраняем hex_stats для теста
         if self.train:
             self.hex_stats = hex_stats[[
                 'hex_price_median',
@@ -835,7 +836,7 @@ class DataProcessingPipeline:
                 'hex_price_per_land'
             ]].copy()
     
-        # 9. Объединение с основными данными (оригинальный df)
+        # 9. Объединение с основными данными
         df = df.merge(
             hex_stats,
             on='hex_id',
