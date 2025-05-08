@@ -527,12 +527,12 @@ class DataProcessingPipeline:
               self.fitted_outlier_bounds[column] = (lower_bound, upper_bound)
       
       # Проверяем, что границы загружены (в режиме test)
-      elif not hasattr(self, 'fitted_outlier_bounds'):
+      elif not hasattr(self, 'outlier_bounds'):
           raise ValueError("Outlier bounds must be fitted in train mode first!")
       
       # Добавляем колонки-флаги для каждой переменной
       for column in columns:
-          lower_bound, upper_bound = self.fitted_outlier_bounds[column]
+          lower_bound, upper_bound = self.outlier_bounds[column]
           df[f'is_{column}_outlier'] = (df[column] < lower_bound) | (df[column] > upper_bound)
       
       return df
