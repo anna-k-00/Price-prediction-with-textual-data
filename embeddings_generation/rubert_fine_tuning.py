@@ -10,71 +10,92 @@ from typing import List, Optional
 warnings.filterwarnings('ignore')
 
 class RuBertTiny2Embedder(BaseEstimator, TransformerMixin):
-    def __init__(
-        self,
-        max_length: int = 512,
-        batch_size: int = 128,
-        num_epochs: int = 5,
-        n_splits: Optional[int] = None,
-        learning_rate: float = 2e-5,
-        sample_size: Optional[int] = None,
-        device: Optional[str] = None,
-        use_cv: bool = False
-    ):
-        """
-        Initialize the rubert-tiny2 embedder with configurable parameters.
-        
-        Args:
-            max_length: Maximum sequence length
-            batch_size: Training and inference batch size
-            num_epochs: Number of training epochs
-            n_splits: Number of cross-validation splits (None when use_cv=False)
-            learning_rate: Learning rate for optimizer
-            sample_size: Optional subsample size for quick testing
-            device: Device to use ('cuda' or 'cpu'), auto-detects if None
-            use_cv: Whether to perform internal cross-validation
-        """
+    def __init__(self, max_length=512, batch_size=128, learning_rate=2e-5, device=None):
         self.max_length = max_length
         self.batch_size = batch_size
-        self.num_epochs = num_epochs
-        self.n_splits = n_splits if use_cv else None
         self.learning_rate = learning_rate
-        self.sample_size = sample_size
         self.device = device or ('cuda' if torch.cuda.is_available() else 'cpu')
-        self.use_cv = use_cv
-        
         self.model = None
         self.tokenizer = None
-        self.cv_scores = None
-    
+
     class _TextPriceDataset(Dataset):
-        """Internal dataset class for text-price pairs"""
+        __slots__ = ['texts', 'prices', 'tokenizer', 'max_length']  # Уменьшаем накладные расходы
+        
         def __init__(self, texts, prices, tokenizer, max_length):
-            self.texts = texts
-            self.prices = prices
+            # Быстрое преобразование без лишних проверок (предполагаем правильный вход)
+            self.texts = texts.values if hasattr(texts, 'values') else texts
+            self.prices = prices.values if hasattr(prices, 'values') else prices
             self.tokenizer = tokenizer
             self.max_length = max_length
-            
+        
         def __len__(self):
             return len(self.texts)
         
         def __getitem__(self, idx):
-            text = str(self.texts[idx])
-            price = self.prices[idx]
-            
-            encoding = self.tokenizer(
-                text,
-                max_length=self.max_length,
-                padding='max_length',
-                truncation=True,
-                return_tensors='pt'
-            )
-            
+            # Минимально необходимые преобразования
             return {
-                'input_ids': encoding['input_ids'].flatten(),
-                'attention_mask': encoding['attention_mask'].flatten(),
-                'price': torch.tensor(price, dtype=torch.float32)
+                'input_ids': self.tokenizer(
+                    str(self.texts[idx]),
+                    max_length=self.max_length,
+                    padding='max_length',
+                    truncation=True,
+                    return_tensors='pt'
+                )['input_ids'].flatten(),
+                'attention_mask': self.tokenizer(
+                    str(self.texts[idx]),
+                    max_length=self.max_length,
+                    padding='max_length',
+                    truncation=True,
+                    return_tensors='pt'
+                )['attention_mask'].flatten(),
+                'price': torch.tensor(float(self.prices[idx]), dtype=torch.float32)
             }
+
+    def fit(self, X, y=None):
+        # Быстрая проверка и преобразование
+        if hasattr(X, 'iloc'):
+            X = X.iloc[:, 0] if X.ndim > 1 else X
+        
+        self.tokenizer = AutoTokenizer.from_pretrained("cointegrated/rubert-tiny2")
+        self.model = self._PricePredictionModel().to(self.device)
+        
+        if y is not None:
+            dataset = self._TextPriceDataset(X, y, self.tokenizer, self.max_length)
+            dataloader = DataLoader(dataset, 
+                                  batch_size=self.batch_size, 
+                                  shuffle=True,
+                                  pin_memory=True)  # Ускоряет передачу на GPU
+            
+            optimizer = AdamW(self.model.parameters(), lr=self.learning_rate)
+            loss_fn = nn.MSELoss()
+            
+            # Одного эпоха обычно достаточно для фича-экстрактора
+            self._train_epoch(self.model, dataloader, optimizer, loss_fn)
+        
+        return self
+
+    def transform(self, X):
+        if hasattr(X, 'iloc'):
+            X = X.iloc[:, 0] if X.ndim > 1 else X
+        
+        dataset = self._TextPriceDataset(X, [0]*len(X), self.tokenizer, self.max_length)
+        dataloader = DataLoader(dataset, 
+                              batch_size=self.batch_size, 
+                              shuffle=False,
+                              pin_memory=True)
+        
+        self.model.eval()
+        all_embeddings = []
+        
+        with torch.no_grad():
+            for batch in dataloader:
+                inputs = {k: v.to(self.device) for k, v in batch.items() 
+                         if k in ['input_ids', 'attention_mask']}
+                _, embeddings = self.model(**inputs)
+                all_embeddings.append(embeddings.cpu().numpy())
+        
+        return np.concatenate(all_embeddings, axis=0)
+    
     
     class _PricePredictionModel(nn.Module):
         """Internal model with regression head"""
@@ -113,28 +134,6 @@ class RuBertTiny2Embedder(BaseEstimator, TransformerMixin):
             total_loss += loss.item()
         
         return total_loss / len(dataloader)
-    
-    def fit(self, X: List[str], y: List[float]):
-        """
-        Fine-tune the model on text-price pairs.
-        
-        Args:
-            X: List of training texts
-            y: Corresponding list of prices/target values
-        """
-        if self.sample_size and len(X) > self.sample_size:
-            indices = np.random.choice(len(X), self.sample_size, replace=False)
-            X = [X[i] for i in indices]
-            y = [y[i] for i in indices]
-        
-        model_name = "cointegrated/rubert-tiny2"
-        self.tokenizer = AutoTokenizer.from_pretrained(model_name)
-        self.model = self._PricePredictionModel(model_name).to(self.device)
-        
-        if self.use_cv and self.n_splits and self.n_splits > 1:
-            return self._fit_with_cv(X, y)
-        else:
-            return self._fit_direct(X, y)
     
     def _fit_direct(self, X, y):
         """Train without cross-validation"""
@@ -210,32 +209,3 @@ class RuBertTiny2Embedder(BaseEstimator, TransformerMixin):
                 total_loss += loss_fn(predictions.squeeze(), prices).item()
         
         return total_loss / len(dataloader)
-    
-    def transform(self, X: List[str]) -> np.ndarray:
-        """
-        Generate embeddings for new texts using the fine-tuned model.
-        
-        Args:
-            X: List of texts to embed
-            
-        Returns:
-            Numpy array of embeddings (shape [n_samples, hidden_size])
-        """
-        if self.model is None or self.tokenizer is None:
-            raise ValueError("Model has not been trained. Call fit() first.")
-        
-        dataset = self._TextPriceDataset(X, [0]*len(X), self.tokenizer, self.max_length)
-        dataloader = DataLoader(dataset, batch_size=self.batch_size, shuffle=False)
-        
-        self.model.eval()
-        all_embeddings = []
-        
-        with torch.no_grad():
-            for batch in dataloader:
-                input_ids = batch['input_ids'].to(self.device)
-                attention_mask = batch['attention_mask'].to(self.device)
-                
-                _, embeddings = self.model(input_ids, attention_mask)
-                all_embeddings.append(embeddings.cpu().numpy())
-        
-        return np.concatenate(all_embeddings, axis=0)
