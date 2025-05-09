@@ -235,10 +235,10 @@ class DataProcessingPipeline:
         return self.df
 
     def prepare_for_model(self):
-        """Подготовка данных для модели: удаление выбросов + нормализация"""
+        """Подготовка данных для модели: пометка выбросов + нормализация"""
         self.df = self.df.reset_index()
         
-        # Удаление выбросов
+        # Пометка выбросов вместо удаления
         if self.train:
             self.df = self.mark_outliers(self.df, columns=['price','houseArea', 'landArea'])
         else:
@@ -266,17 +266,16 @@ class DataProcessingPipeline:
         if self.norm_needed:
             if self.use_hex_features:
                 columns_to_normalize = [
-                'houseArea', 'landArea', 'distanceFromMkad', 
-                'year', 'distanceToCityKm', 'price'
-            ]
+                    'houseArea', 'landArea', 'distanceFromMkad', 
+                    'year', 'distanceToCityKm', 'price'
+                ]
             else:
                 columns_to_normalize = [
-                'houseArea', 'landArea', 'distanceFromMkad', 
-                'year', 'distanceToCityKm', 'hex_price_median', 'hex_price_per_sqm', 'hex_price_per_land',
+                    'houseArea', 'landArea', 'distanceFromMkad', 
+                    'year', 'distanceToCityKm', 'hex_price_median', 'hex_price_per_sqm', 'hex_price_per_land',
                     'neighbor_hex_price_median', 'neighbor_hex_price_per_sqm',
                     'neighbor_hex_price_per_land','price'
-            ]
-            
+                ]
             
             columns_to_normalize = [col for col in columns_to_normalize if col in self.df.columns]
             
@@ -309,27 +308,201 @@ class DataProcessingPipeline:
         else:
             return self.df.set_index('id')
 
-    def _apply_normalization(self, df):
-        """Применяет нормализацию к данным"""
-        if self.log_needed:
-            df['houseArea'] = np.log1p(df['houseArea'])
-            df['landArea'] = np.log1p(df['landArea'])
-            df['distanceFromMkad'] = np.log1p(df['distanceFromMkad'] + 1)
-            df['distanceToCityKm'] = np.log1p(df['distanceToCityKm'] + 1)
-            df['price'] = np.log1p(df['price'])
-    
-        if self.norm_needed and self.scaler is not None and self.lat_long_scaler is not None:
-            # Нормализация для числовых признаков
-            columns_to_normalize = ['houseArea', 'landArea', 'distanceFromMkad', 
-                                   'year', 'distanceToCityKm', 'price']
-            df[columns_to_normalize] = self.scaler.transform(df[columns_to_normalize])
+    def mark_outliers(self, df, columns, lower_percentile=0.01, upper_percentile=0.99):
+        """
+        Mark outliers in multiple columns of a DataFrame instead of removing them.
+        In train mode: calculates and saves bounds
+        In apply mode: uses pre-calculated bounds
+        """
+        if self.train:
+            # Режим обучения - вычисляем границы
+            bounds = {}
+            for column in columns:
+                lower_bound = df[column].quantile(lower_percentile)
+                upper_bound = df[column].quantile(upper_percentile)
+                bounds[column] = (lower_bound, upper_bound)
             
-            # Нормализация для координат
-            df[['latitude', 'longitude']] = self.lat_long_scaler.transform(
-                df[['latitude', 'longitude']]
-            )
+            # Сохраняем вычисленные границы
+            self.fitted_outlier_bounds = bounds
+            
+            # Создаем колонки с метками выбросов
+            for column, (lower_bound, upper_bound) in bounds.items():
+                df[f'is_{column}_outlier'] = ((df[column] < lower_bound) | (df[column] > upper_bound)).astype(int)
+        else:
+            # Режим применения - используем предварительно вычисленные границы
+            if not self.outlier_bounds:
+                raise ValueError("Outlier bounds must be provided in apply mode")
+            
+            for column in columns:
+                if column not in self.outlier_bounds:
+                    raise ValueError(f"No bounds provided for column: {column}")
+                
+                lower_bound, upper_bound = self.outlier_bounds[column]
+                df[f'is_{column}_outlier'] = ((df[column] < lower_bound) | (df[column] > upper_bound)).astype(int)
         
         return df
+
+    def _calculate_hexagon_metrics(self, df: pd.DataFrame) -> pd.DataFrame:
+        """Переработанная версия с надежным объединением данных"""
+        if not self.use_hex_features:
+            return df
+    
+        # 1. Создаем гексагоны для всех объектов
+        df['hex_id'] = df.apply(
+            lambda row: h3.latlng_to_cell(row['latitude'], row['longitude'], self.hex_resolution),
+            axis=1
+        )
+    
+        # 2. Определяем маску не-выбросов (только для train)
+        if self.train:
+            non_outliers_mask = ~(df['is_price_outlier'].astype(bool) | 
+                                df['is_houseArea_outlier'].astype(bool) | 
+                                df['is_landArea_outlier'].astype(bool))
+            df_non_outliers = df[non_outliers_mask]
+        else:
+            df_non_outliers = df
+    
+        # 3. Расчет количества объектов в гексагонах (без выбросов)
+        hex_counts = df_non_outliers['hex_id'].value_counts().rename('hex_property_count')
+        
+        # 4. Расчет базовых статистик (только на не-выбросах)
+        hex_stats = df_non_outliers.groupby('hex_id').agg({
+            'price': 'median',
+            'houseArea': 'median',
+            'landArea': 'median'
+        }).rename(columns={
+            'price': 'hex_price_median',
+            'houseArea': 'hex_median_house_area',
+            'landArea': 'hex_median_land_area'
+        })
+    
+        # 5. Добавляем количество объектов в статистики
+        hex_stats = hex_stats.join(hex_counts)
+    
+        # 6. Расчет производных метрик
+        hex_stats['hex_price_per_sqm'] = (
+            hex_stats['hex_price_median'] / 
+            hex_stats['hex_median_house_area'].replace(0, np.nan)
+        )
+        hex_stats['hex_price_per_land'] = (
+            hex_stats['hex_price_median'] / 
+            hex_stats['hex_median_land_area'].replace(0, np.nan)
+        )
+    
+        # 7. Расчет глобальных медиан (только на train)
+        if self.train:
+            df_non_outliers['price_per_sqm'] = np.where(
+                df_non_outliers['houseArea'] > 0,
+                df_non_outliers['price'] / df_non_outliers['houseArea'],
+                np.nan
+            )
+            df_non_outliers['price_per_land'] = np.where(
+                df_non_outliers['landArea'] > 0,
+                df_non_outliers['price'] / df_non_outliers['landArea'],
+                np.nan
+            )
+            self.global_median_ppsm = df_non_outliers['price_per_sqm'].median()
+            self.global_median_ppland = df_non_outliers['price_per_land'].median()
+            self.global_median_price = df_non_outliers['price'].median()
+    
+        # 8. Заполнение пропусков в статистиках
+        hex_stats = hex_stats.fillna({
+            'hex_price_median': self.global_median_price,
+            'hex_price_per_sqm': self.global_median_ppsm,
+            'hex_price_per_land': self.global_median_ppland,
+            'hex_median_house_area': df_non_outliers['houseArea'].median(),
+            'hex_median_land_area': df_non_outliers['landArea'].median(),
+            'hex_property_count': 0
+        })
+    
+        # 9. Сохранение статистик для теста
+        self.hex_stats = hex_stats.copy()
+    
+        # 10. Объединение с основными данными (надежный способ)
+        hex_stats_reset = hex_stats.reset_index()
+        
+        # Объединяем все статистики за один шаг
+        df = df.merge(
+            hex_stats_reset,
+            on='hex_id',
+            how='left',
+            suffixes=('', '_y')
+        )
+    
+        # 11. Обработка выбросов - заполняем глобальными медианами
+        outlier_mask = (
+            df['is_price_outlier'].astype(bool) |
+            df['is_houseArea_outlier'].astype(bool) |
+            df['is_landArea_outlier'].astype(bool)
+        )
+    
+        # Заполняем все hex-метрики для выбросов глобальными медианами
+        hex_metric_cols = [
+            'hex_price_median', 'hex_price_per_sqm', 'hex_price_per_land',
+            'hex_median_house_area', 'hex_median_land_area', 'hex_property_count'
+        ]
+        
+        for col in hex_metric_cols:
+            df.loc[outlier_mask & df[col].isna(), col] = (
+                self.global_median_price if 'price_median' in col else
+                self.global_median_ppsm if 'sqm' in col else
+                self.global_median_ppland if 'land' in col else
+                df_non_outliers['houseArea'].median() if 'house_area' in col else
+                df_non_outliers['landArea'].median() if 'land_area' in col else
+                0  # для hex_property_count
+            )
+    
+        # 12. Расчет статистик соседей
+        neighbor_stats = []
+        for hex_id in hex_stats.index:
+            neighbors = h3.grid_disk(hex_id, 1)
+            valid_neighbors = [n for n in neighbors if n != hex_id and n in hex_stats.index]
+            
+            if valid_neighbors:
+                neighbor_data = hex_stats.loc[valid_neighbors]
+                stats = {
+                    'hex_id': hex_id,
+                    'neighbor_hex_price_median': neighbor_data['hex_price_median'].median(),
+                    'neighbor_hex_price_per_sqm': (
+                        neighbor_data['hex_price_median'].sum() / 
+                        neighbor_data['hex_median_house_area'].sum()
+                    ),
+                    'neighbor_hex_price_per_land': (
+                        neighbor_data['hex_price_median'].sum() / 
+                        neighbor_data['hex_median_land_area'].sum()
+                    )
+                }
+            else:
+                stats = {
+                    'hex_id': hex_id,
+                    'neighbor_hex_price_median': self.global_median_price,
+                    'neighbor_hex_price_per_sqm': self.global_median_ppsm,
+                    'neighbor_hex_price_per_land': self.global_median_ppland
+                }
+            neighbor_stats.append(stats)
+    
+        neighbor_stats_df = pd.DataFrame(neighbor_stats)
+        df = df.merge(neighbor_stats_df, on='hex_id', how='left')
+    
+        # 13. Для выбросов заполняем neighbor-метрики глобальными медианами
+        for col in ['neighbor_hex_price_median', 'neighbor_hex_price_per_sqm', 'neighbor_hex_price_per_land']:
+            df.loc[outlier_mask & df[col].isna(), col] = (
+                self.global_median_price if 'median' in col else
+                self.global_median_ppsm if 'sqm' in col else
+                self.global_median_ppland
+            )
+    
+        # 14. Удаление временных колонок
+        drop_cols = ['hex_id']
+        # Удаляем дубликаты столбцов
+        for col in df.columns:
+            if col.endswith('_y'):
+                original_col = col[:-2]
+                if original_col in df.columns:
+                    df[original_col] = df[original_col].fillna(df[col])
+                    drop_cols.append(col)
+        
+        return df.drop(columns=drop_cols, errors='ignore')
         
     def process_for_ml(self):
         # description_data = self.df[['id', 'description']].set_index('id').copy()
@@ -383,11 +556,14 @@ class DataProcessingPipeline:
         return df
     
     def find_highway(self, address):
+        if pd.isna(address):
+            return None
+            
         highway_pattern = re.compile(
             '|'.join(re.escape(highway) for highway in self.highways.keys()),
             flags=re.IGNORECASE
         )
-        matches = highway_pattern.findall(address.lower())
+        matches = highway_pattern.findall(str(address).lower())
         if matches:
             return self.highways[matches[0].lower()]
         return None
@@ -512,30 +688,41 @@ class DataProcessingPipeline:
         # integer_columns.append('yearIsNull')
 
     
-    def mark_outliers(self, df, columns, lower_percentile=0.0001, upper_percentile=0.999):
-      """
-      Добавляет колонки is_<column>_outlier для указанных признаков.
-      В режиме train вычисляет и сохраняет границы.
-      В режиме test использует сохранённые границы.
-      """
-      if self.train:
-          # Режим обучения - вычисляем границы
-          self.fitted_outlier_bounds = {}
-          for column in columns:
-              lower_bound = df[column].quantile(lower_percentile)
-              upper_bound = df[column].quantile(upper_percentile)
-              self.fitted_outlier_bounds[column] = (lower_bound, upper_bound)
-      
-      # Проверяем, что границы загружены (в режиме test)
-      elif not hasattr(self, 'outlier_bounds'):
-          raise ValueError("Outlier bounds must be fitted in train mode first!")
-      
-      # Добавляем колонки-флаги для каждой переменной
-      for column in columns:
-          lower_bound, upper_bound = self.outlier_bounds[column]
-          df[f'is_{column}_outlier'] = (df[column] < lower_bound) | (df[column] > upper_bound)
-      
-      return df
+    def remove_outliers(self, df, columns, lower_percentile=0.01, upper_percentile=0.99):
+        """
+        Remove the lower and upper percentiles from multiple columns in a DataFrame.
+        In train mode: calculates and saves bounds
+        In apply mode: uses pre-calculated bounds
+        """
+        if self.train:
+            # Режим обучения - вычисляем границы
+            bounds = {}
+            for column in columns:
+                lower_bound = df[column].quantile(lower_percentile)
+                upper_bound = df[column].quantile(upper_percentile)
+                bounds[column] = (lower_bound, upper_bound)
+            
+            # Сохраняем вычисленные границы
+            self.fitted_outlier_bounds = bounds
+            
+            # Фильтруем данные
+            mask = pd.Series(True, index=df.index)
+            for column, (lower_bound, upper_bound) in bounds.items():
+                mask &= (df[column] >= lower_bound) & (df[column] <= upper_bound)
+        else:
+            # Режим применения - используем предварительно вычисленные границы
+            if not self.outlier_bounds:
+                raise ValueError("Outlier bounds must be provided in apply mode")
+            
+            mask = pd.Series(True, index=df.index)
+            for column in columns:
+                if column not in self.outlier_bounds:
+                    raise ValueError(f"No bounds provided for column: {column}")
+                
+                lower_bound, upper_bound = self.outlier_bounds[column]
+                mask &= (df[column] >= lower_bound) & (df[column] <= upper_bound)
+        
+        return df[mask]
         
     def nearest_city(self, latitude, longitude):
         min_distance = float("inf")
@@ -720,140 +907,6 @@ class DataProcessingPipeline:
             for col in [col for col in self.object_columns if col not in self.not_always_one_hot]:
                 df = self.one_hot_encode_with_mappings(df, col, self.transformations)
             return df, label_encoders
-
-    def _calculate_hexagon_metrics(self, df: pd.DataFrame) -> pd.DataFrame:
-        """
-        Полный метод расчета метрик гексагонов (игнорирует outlier-строки при расчете статистик).
-        """
-        if not self.use_hex_features:
-            return df
-    
-        # 1. Создаем гексагоны для всех объектов
-        df['hex_id'] = df.apply(
-            lambda row: h3.latlng_to_cell(row['latitude'], row['longitude'], self.hex_resolution),
-            axis=1
-        )
-        
-        # 2. Расчет количества объектов в каждом гексагоне (для всего датасета)
-        hex_counts = df['hex_id'].value_counts()
-        df['hex_property_count'] = df['hex_id'].map(hex_counts)
-    
-        # 3. Фильтрация строк без outlier-флагов (если колонки существуют)
-        outlier_cols = [col for col in df.columns if col.startswith('is_') and col.endswith('_outlier')]
-        if outlier_cols:
-            df_clean = df[~df[outlier_cols].any(axis=1)].copy()
-        else:
-            df_clean = df.copy()
-    
-        # 4. Расчет статистик (только на train)
-        if self.train:
-            # Расчет price/sqm и price/land (на чистых данных)
-            df_clean['price_per_sqm'] = np.where(
-                df_clean['houseArea'] > 0,
-                df_clean['price'] / df_clean['houseArea'],
-                np.nan
-            )
-            df_clean['price_per_land'] = np.where(
-                df_clean['landArea'] > 0,
-                df_clean['price'] / df_clean['landArea'],
-                np.nan
-            )
-            
-            # Глобальные медианы (на чистых данных)
-            self.global_median_ppsm = df_clean['price_per_sqm'].median()
-            self.global_median_ppland = df_clean['price_per_land'].median()
-            self.global_median_price = df_clean['price'].median()
-    
-        # 5. Основные статистики по гексагонам (на чистых данных)
-        hex_stats = df_clean.groupby('hex_id').agg({
-            'price': 'median',
-            'houseArea': 'median',
-            'landArea': 'median',
-            'hex_property_count': 'first'  # Используем колонку из основного df
-        })
-        hex_stats.columns = [
-            'hex_price_median',
-            'hex_median_house_area',
-            'hex_median_land_area',
-            'hex_property_count'
-        ]
-    
-        # Остальной код остается без изменений...
-        # 6. Производные метрики
-        hex_stats['hex_price_per_sqm'] = (
-            hex_stats['hex_price_median'] / 
-            hex_stats['hex_median_house_area'].replace(0, np.nan)
-        ).fillna(self.global_median_ppsm if hasattr(self, 'global_median_ppsm') else np.nan)
-    
-        hex_stats['hex_price_per_land'] = (
-            hex_stats['hex_price_median'] / 
-            hex_stats['hex_median_land_area'].replace(0, np.nan)
-        ).fillna(self.global_median_ppland if hasattr(self, 'global_median_ppland') else np.nan)
-    
-        # 7. Обработка соседей
-        neighbor_stats = []
-        for hex_id in hex_stats.index:
-            current_count = hex_stats.loc[hex_id, 'hex_property_count']
-            neighbors = h3.grid_disk(hex_id, 1)
-            neighbors = [n for n in neighbors if n != hex_id and n in hex_stats.index]
-    
-            if neighbors:
-                neighbor_data = hex_stats.loc[neighbors]
-                stats = {
-                    'hex_id': hex_id,
-                    'neighbor_hex_price_median': neighbor_data['hex_price_median'].median(),
-                    'neighbor_hex_property_count': neighbor_data['hex_property_count'].sum(),
-                    'neighbor_hex_price_per_sqm': (
-                        neighbor_data['hex_price_median'].sum() / 
-                        neighbor_data['hex_median_house_area'].sum()
-                    ),
-                    'neighbor_hex_price_per_land': (
-                        neighbor_data['hex_price_median'].sum() / 
-                        neighbor_data['hex_median_land_area'].sum()
-                    )
-                }
-            else:
-                stats = {
-                    'hex_id': hex_id,
-                    'neighbor_hex_price_median': self.global_median_price,
-                    'neighbor_hex_property_count': 0,
-                    'neighbor_hex_price_per_sqm': self.global_median_ppsm,
-                    'neighbor_hex_price_per_land': self.global_median_ppland
-                }
-            neighbor_stats.append(stats)
-    
-        neighbor_stats_df = pd.DataFrame(neighbor_stats).set_index('hex_id')
-        hex_stats = hex_stats.join(neighbor_stats_df)
-    
-        # 8. Сохраняем hex_stats для теста
-        if self.train:
-            self.hex_stats = hex_stats[[
-                'hex_price_median',
-                'hex_median_house_area',
-                'hex_median_land_area',
-                'hex_property_count',
-                'hex_price_per_sqm',
-                'hex_price_per_land'
-            ]].copy()
-    
-        # 9. Объединение с основными данными
-        df = df.merge(
-            hex_stats,
-            on='hex_id',
-            how='left',
-            suffixes=('', '_y')
-        )
-    
-        # 10. Удаляем дублирующиеся колонки после merge
-        cols_to_keep = [col for col in df.columns if not col.endswith('_y')]
-        df = df[cols_to_keep]
-    
-        # 11. Очистка временных колонок
-        drop_cols = ['hex_id']
-        if self.train and 'price_per_sqm' in df.columns:
-            drop_cols.extend(['price_per_sqm', 'price_per_land'])
-    
-        return df.drop(columns=drop_cols)
     
     def get_hexagon_stats(self) -> pd.DataFrame:
         """Возвращает статистики по гексагонам"""
