@@ -12,6 +12,7 @@ from requests.exceptions import RequestException
 from joblib import Parallel, delayed
 import nltk
 from tqdm import tqdm  # Use tqdm.auto for better compatibility
+import pymorphy3 
 
 
 
@@ -29,6 +30,8 @@ class TextPreprocessor:
                  lemmatize_text = True, 
                  remove_stopwords = True, 
                  remove_punctuation = True,
+                 remove_trash = True,
+                 mask_nums=False,
                  n_jobs=-1):
         """
         Initialize the TextPreprocessor class.
@@ -39,6 +42,7 @@ class TextPreprocessor:
         :param lemmatize_text: If True, perform lemmatization after all other preprocessing steps.
         :param remove_stopwords: If True, remove stopwords after lemmatization.
         """
+        self.mask_nums = mask_nums
         self.n_jobs = n_jobs
         self.df = df.copy()
         self.text_columns = text_columns if text_columns else df.columns
@@ -46,12 +50,32 @@ class TextPreprocessor:
         self.lemmatize_text = lemmatize_text
         self.remove_stopwords = remove_stopwords
         self.remove_punctuation = remove_punctuation
-
+        self.remove_trash = remove_trash
         # Load stopwords in the main process
         self.stop_words = set(stopwords.words('russian')) if remove_stopwords else set()
         self.stop_words.difference_update({'нет', 'есть'})  # Optional: Keep certain stopwords
         self.stop_words.difference_update({'нет', 'есть'})
-
+        # Initialize trash words patterns if remove_trash is True
+        
+        if self.remove_trash:
+            self.unwanted_roots = {
+                'звон', 'пиш', 'пис', 'посыл', 'слан', 'приезж', 'отправ', 'говор', 
+                'зада', 'спраш', 'вопрос', 'сообщ', 'дава', 'отвеч', 'ответ', 
+                'советова', 'смотр', 'узна', 'мож', 'мог', 'уточн', 'помог', 
+                'сказ', 'помоч', 'говор'
+            }
+            
+            self.politeness_phrases = {
+                'здравствуйте', 'привет', 'добрый', 'день', 'утро', 'вечер', 'ночь',
+                'спасибо', 'благодар', 'пожалуйста', 'прошу', 'будь', 'добр', 'любезн',
+                'извините', 'простите', 'до свидания', 'пока', 'всего хорошего'
+            }
+            
+            self.pronoun_tags = {'NPRO'}
+            
+            # Initialize morph analyzer
+            self.morph = pymorphy3.MorphAnalyzer()
+            
         # Initialize ordinal replacements
         self.ordinal_replacements = {
             # Именительный падеж (единственное число)
@@ -461,8 +485,26 @@ class TextPreprocessor:
                 r'(?<!\w)(постоянн(?:ое|ого|ому|ом|ая|ой|ую|ою|ые|ых|ым|ыми) мест(?:о|а|у|ом|е|ы|ов|ам|ами|ах) жительств(?:а|у|ом|е|ы|ов|ам|ами|ах))(?!\w)': 'пмж',
                 
                 # Материнский капитал
-                r'(?<!\w)(мат капитал|мат\. капитал|материнский капитал)(?!\w)': 'материнский капитал',
-                r'(?<!\w)(мат капиталом|мат\. капиталом|материнским капиталом)(?!\w)': 'материнским капиталом',
+                r'(?<!\w)(мат капитал|мат\. капитал|материнский капитал)(?!\w)': 'материнский_капитал',
+                r'(?<!\w)(мат капиталом|мат\. капиталом|материнским капиталом)(?!\w)': 'материнский_капитал',
+
+
+                # Коттеджный поселок
+                r'(?<!\w)(кп|коттеджный\s*пос(елок)?|кот\s*пос(елок)?|коттедджный\s*пос(елок)?)(?!\w)': 'коттеджный_поселок',
+                # Без отделки
+                r'(без\s*отделки|нет\s*отделки|отделки\s*нет)': 'без_отделки',
+                # С отделкой
+                r'(с\s*отделкой)': 'с_отделкой',
+                # Черновая отделка
+                r'(черновая\s*отделка|отделка\s*черновая|черновой\s*отделки|черновой\s*отделке)': 'черновая_отделка',
+                # Предчистовая отделка
+                r'(предчистовая\s*отделка|пред\s*чистовая\s*отделка|предчистовой\s*отделке|пред\s*чистовой\s*отделке|предчистовой\s*отделки|пред\s*чистовой\s*отделки)': 'предчистовая_отделка',
+                # Чистовая отделка
+                r'(чистовая\s*отделка|чистовой\s*отделки|чистовой\s*отделке)': 'чистовая_отделка',
+                # Теплый контур
+                r'(теплый\s*контур|теплом\s*контуре|теплого\s*контура)': 'теплый_контур',
+                # Холодный контур
+                r'(холодный\s*контур|холодном\s*контуре|холодного\s*контура)': 'холодный_контур',
                 
                 # СНТ (садовое некоммерческое товарищество)
                 r'(?<!\w)(снт|с\.н\.т|с н т)(?!\w)': 'снт',
@@ -478,6 +520,7 @@ class TextPreprocessor:
                 r'(?<!\w)(ижс|и\.ж\.с|и ж с)(?!\w)': 'ижс',
                 
                 # Железнодорожный
+                r'(?<!\w)(ж\\д|ж/д|жд|ж\.д|ж д)(?!\w)': 'железнодорожный',
                 r'(?<!\w)(ж\\д|ж/д|жд|ж\.д|ж д)(?!\w)': 'железнодорожный',
                 
                 # Железобетонный
@@ -784,7 +827,41 @@ class TextPreprocessor:
 
         return text
 
+    def should_remove_word(self, word):
+        """Determine if a word should be removed based on trash patterns."""
+        if not self.remove_trash:
+            return False
+            
+        lower_word = word.lower()
+        
+        # Удаление мусорных слов вежливости
+        if any(polite in lower_word for polite in self.politeness_phrases):
+            return True
+        
+        # Проверка на местоимения и притяжательные местоимения
+        parsed = self.morph.parse(word)[0]
+        if any(tag in parsed.tag for tag in self.pronoun_tags) and not parsed.normal_form.isupper():
+            return True
+        
+        # Проверка однокоренности
+        normal_form = parsed.normal_form
+        word_stem = re.sub(r'(ся|сь)$', '', normal_form)
+        
+        if any(word_stem.startswith(root) for root in self.unwanted_roots):
+            return True
+        
+        return False
 
+    def remove_trash_words(self, text):
+        """Remove trash words from text if the option is enabled."""
+        if not self.remove_trash:
+            return text
+            
+        words = word_tokenize(text, language='russian')
+        cleaned_words = [word for word in words if not self.should_remove_word(word)]
+        return ' '.join(cleaned_words)
+
+    
     def remove_russian_stopwords(self, text):
         """
         Remove Russian stopwords from the text.
@@ -796,6 +873,16 @@ class TextPreprocessor:
         filtered_tokens = [word for word in tokens if word.lower() not in self.stop_words]
         
         return ' '.join(filtered_tokens)
+
+    def mask_numbers(self, text):
+        # Заменяет все числа (в том числе заменённые в ordinal_replacements)
+        # Важно: сначала заменить все слова-числительные из ordinal_replacements на тег [NUM]
+        for word in set(self.ordinal_replacements.values()):
+            text = re.sub(r'\b{}\b'.format(re.escape(word)), '[NUM]', text)
+        # Теперь заменить любые цифры (целые, дробные)
+        text = re.sub(r'\b\d+([.,]\d+)?\b', '[NUM]', text)
+        return text
+    
 
     def process_text(self, text):
         """
@@ -811,26 +898,43 @@ class TextPreprocessor:
         text = self.replace_symbols_with_words(text)
         text = self.replace_square_meter(text)
         text = self.replace_expressions(text)
+
+        if self.mask_nums:
+            text = self.mask_numbers(text)
+            
+        
         text = self.replace_dim(text)
         text = self.replace_units(text)
+        
+
         text = self.replace_ordinals(text)
         text = self.transform_text_mln_k(text)
+
+        
         text = self.final_touch(text)
 
         # Lemmatization (if enabled)
         if self.lemmatize_text:
             text = ''.join(m.lemmatize(text))
 
+        if self.mask_nums:
+            text = self.mask_numbers(text)
+
         # Remove stopwords (if enabled)
         if self.remove_stopwords:
             text = self.remove_russian_stopwords(text)
+        
+        # Remove trash words (if enabled)
+        text = self.remove_trash_words(text)
         
         # Remove all punctuation (if enabled)
         if self.remove_punctuation:
             text = re.sub(r'[^\w\s]', ' ', text)
             text = re.sub(r'\s+', ' ', text).strip()
-
+        
+        
         return text
+
 
     def process_dataframe(self):
         """
