@@ -1,14 +1,16 @@
 import pandas as pd
 import numpy as np
-from math import radians, sin, cos, sqrt, atan2
+from math import radians, sin, cos, sqrt, atan2, degrees
 from shapely.geometry import Point, Polygon
 from shapely.ops import nearest_points
+from sklearn.neighbors import KDTree
 from sklearn.preprocessing import StandardScaler, LabelEncoder, MinMaxScaler
+import requests
+from io import BytesIO
+from zipfile import ZipFile
 import re
 import h3
-import numpy as np
-import pandas as pd
-from typing import Optional, Dict
+from typing import Dict, Optional  # Add this line
 
 class DataProcessingPipeline:
     def __init__(
@@ -44,6 +46,9 @@ class DataProcessingPipeline:
         self.global_median_ppsm = global_median_ppsm
         self.global_median_ppland = global_median_ppland
         self.global_median_price = global_median_price
+        self.cities_df = self._load_geonames_data()
+        self._prepare_cities_kdtree()
+        
         self.column_mapping = {
             'id': 'id',
             'Количество комнат': 'rooms',
@@ -77,7 +82,8 @@ class DataProcessingPipeline:
             'Расстояние до центра города': 'distanceToCityCenter',
             'Терраса или веранда': 'terrace',
             'Для отдыха': 'recreation',
-            'Коммуникации': 'utilities'
+            'Коммуникации': 'utilities',
+            'region': 'region',
         }
         self.mkad_coordinates = [
             (55.880829, 37.442726), (55.908630, 37.576799), (55.896677, 37.647310),
@@ -92,59 +98,6 @@ class DataProcessingPipeline:
         ]
         self.mkad_coordinates_swapped = [(lon, lat) for lat, lon in self.mkad_coordinates]
         self.mkad_polygon = Polygon(self.mkad_coordinates_swapped)
-        self.cities = [
-            {"name": "Balashikha", "latitude": 55.8094, "longitude": 37.9581},
-            {"name": "Khimki", "latitude": 55.8970, "longitude": 37.4297},
-            {"name": "Podolsk", "latitude": 55.4242, "longitude": 37.5547},
-            {"name": "Korolyov", "latitude": 55.9162, "longitude": 37.8265},
-            {"name": "Mytishchi", "latitude": 55.9116, "longitude": 37.7307},
-            {"name": "Lyubertsy", "latitude": 55.6784, "longitude": 37.8933},
-            {"name": "Kolomna", "latitude": 55.0793, "longitude": 38.7783},
-            {"name": "Elektrostal", "latitude": 55.7896, "longitude": 38.4467},
-            {"name": "Odintsovo", "latitude": 55.6772, "longitude": 37.2775},
-            {"name": "Zheleznodorozhny", "latitude": 55.7504, "longitude": 38.0166},
-            {"name": "Serpukhov", "latitude": 54.9158, "longitude": 37.4111},
-            {"name": "Shchyolkovo", "latitude": 55.9249, "longitude": 37.9722},
-            {"name": "Dolgoprudny", "latitude": 55.9387, "longitude": 37.5019},
-            {"name": "Domodedovo", "latitude": 55.4368, "longitude": 37.7661},
-            {"name": "Ramenskoye", "latitude": 55.5669, "longitude": 38.2303},
-            {"name": "Reutov", "latitude": 55.7586, "longitude": 37.8616},
-            {"name": "Noginsk", "latitude": 55.8525, "longitude": 38.4388},
-            {"name": "Pushkino", "latitude": 56.0105, "longitude": 37.8474},
-            {"name": "Zhukovsky", "latitude": 55.6013, "longitude": 38.1115},
-            {"name": "Krasnogorsk", "latitude": 55.8204, "longitude": 37.3302},
-            {"name": "Voskresensk", "latitude": 55.3173, "longitude": 38.6526},
-            {"name": "Sergiev Posad", "latitude": 56.3100, "longitude": 38.1326},
-            {"name": "Orekhovo-Zuyevo", "latitude": 55.8067, "longitude": 38.9618},
-            {"name": "Klin", "latitude": 56.3333, "longitude": 36.7333},
-            {"name": "Chekhov", "latitude": 55.1527, "longitude": 37.4783},
-            {"name": "Naro-Fominsk", "latitude": 55.3875, "longitude": 36.7333},
-            {"name": "Lobnya", "latitude": 56.0127, "longitude": 37.4744},
-            {"name": "Dubna", "latitude": 56.7333, "longitude": 37.1667},
-            {"name": "Yegoryevsk", "latitude": 55.3843, "longitude": 39.0309},
-            {"name": "Stupino", "latitude": 54.9008, "longitude": 38.0708},
-            {"name": "Pavlovsky Posad", "latitude": 55.7819, "longitude": 38.6506},
-            {"name": "Istra", "latitude": 55.9225, "longitude": 36.8647},
-            {"name": "Fryazino", "latitude": 55.9606, "longitude": 38.0456},
-            {"name": "Lytkarino", "latitude": 55.5833, "longitude": 37.9000},
-            {"name": "Dzerzhinsky", "latitude": 55.6286, "longitude": 37.8547},
-            {"name": "Kashira", "latitude": 54.8333, "longitude": 38.1500},
-            {"name": "Protvino", "latitude": 54.8667, "longitude": 37.2167},
-            {"name": "Troitsk", "latitude": 55.4833, "longitude": 37.3000},
-            {"name": "Lukhovitsy", "latitude": 54.9667, "longitude": 39.0167},
-            {"name": "Zaraysk", "latitude": 54.7667, "longitude": 38.8833},
-            {"name": "Mozhaysk", "latitude": 55.5000, "longitude": 36.0333},
-            {"name": "Volokolamsk", "latitude": 56.0333, "longitude": 35.9500},
-            {"name": "Shatura", "latitude": 55.5667, "longitude": 39.5333},
-            {"name": "Zvenigorod", "latitude": 55.7333, "longitude": 36.8500},
-            {"name": "Roshal", "latitude": 55.6667, "longitude": 39.8833},
-            {"name": "Kubinka", "latitude": 55.5667, "longitude": 36.7000},
-            {"name": "Chernogolovka", "latitude": 56.0167, "longitude": 38.3833},
-            {"name": "Krasnoarmeysk", "latitude": 56.1000, "longitude": 38.1333},
-            {"name": "Elektrogorsk", "latitude": 55.8833, "longitude": 38.7833},
-            {"name": "Vysokovsk", "latitude": 56.3167, "longitude": 36.5500},
-            {"name": "Likino-Dulyovo", "latitude": 55.7167, "longitude": 38.9500},
-        ]
         self.transformations = {
             'electricity': {'есть': 'yes'},
             'bathroom': {'в доме': 'inside', 'на улице': 'outside'},
@@ -165,84 +118,203 @@ class DataProcessingPipeline:
             'landCategory': {'садовое некоммерческое товарищество (СНТ)': 'snt', 'фермерское хозяйство': 'farm', 'Личное подсобное хозяйство (ЛПХ)': 'lph', 'дачное некоммерческое партнёрство (ДНП)': 'dnp', 'индивидуальное жилищное строительство (ИЖС)': 'izhs'},
             'wallMaterial': {'бревно': 'log', 'экспериментальные материалы': 'experimental', 'пеноблоки': 'foamBlock', 'металл': 'metal', 'сэндвич-панели': 'sandwichPanel', 'газоблоки': 'gasBlock', 'кирпич': 'brick', 'железобетонные панели': 'concretePanel', 'брус': 'timber'},
         }
-        self.highways = {
-                'алтуфьевское': 'altufyevskoye',
-                'боровское': 'borovskoye',
-                'быковское': 'bykovskoye',
-                'варшавское': 'varshavskoye',
-                'волоколамское': 'volokolamskoye',
-                'горьковское': 'gorkovskoye',
-                'дмитровское': 'dmitrovskoye',
-                'егорьевское': 'yegoryevskoye',
-                'ильинское': 'ilinskoye',
-                'калужское': 'kaluzhskoye',
-                'каширское': 'kashirskoye',
-                'киевское': 'kiyevskoye',
-                'куркинское': 'kurkinskoye',
-                'ленинградское': 'leningradskoye',
-                'минское': 'minskoye',
-                'можайское': 'mozhayskoye',
-                'новокаширское': 'novokashirskoye',
-                'новорижское': 'novorizhskoye',
-                'новорязанское': 'novoryazanskoye',
-                'новосходненское': 'novoskhodnenskoye',
-                'носовихинское': 'nosovikhinskoye',
-                'осташковское': 'ostashkovskoye',
-                'пятницкое': 'pyatnitskoye',
-                'рогачёвское': 'rogachyovskoye',
-                'рублёво-успенское': 'rublyovo-uspenskoye',
-                'рублёвское': 'rublyovskoye',
-                'рязанское': 'ryazanskoye',
-                'симферопольское': 'simferopolskoye',
-                'сколковское': 'skolkovskoye',
-                'фряновское': 'fryanovskoye',
-                'щёлковское': 'shchyolkovskoye',
-                'ярославское': 'yaroslavskoye'
-            }
 
+    def _load_geonames_data(self):
+        """Загружаем данные городов из Geonames"""
+        url = "http://download.geonames.org/export/dump/RU.zip"
+        response = requests.get(url)
+        zipfile = ZipFile(BytesIO(response.content))
 
+        with zipfile.open("RU.txt") as f:
+            df = pd.read_csv(f, sep='\t', header=None, encoding='utf-8')
+
+        columns = [
+            'geonameid', 'name', 'asciiname', 'alternatenames', 'latitude', 'longitude',
+            'feature_class', 'feature_code', 'country_code', 'cc2', 'admin1_code',
+            'admin2_code', 'admin3_code', 'admin4_code', 'population', 'elevation',
+            'dem', 'timezone', 'modification_date'
+        ]
+        df.columns = columns
+
+        # Оставляем только города нужных типов
+        cities_df = df[df['feature_code'].isin(['PPLC','PPLA','PPLA2'])]
+        return cities_df[['name', 'latitude', 'longitude', 'feature_code', 'admin1_code']]
+
+    def _prepare_cities_kdtree(self):
+        """Подготавливаем KDTree для быстрого поиска городов"""
+        # Создаем отдельные деревья для разных типов городов
+        self.ppla_df = self.cities_df[self.cities_df['feature_code'].isin(['PPLC', 'PPLA'])]
+        self.ppla2_df = self.cities_df[self.cities_df['feature_code'] == 'PPLA2']
+        
+        self.ppla_tree = KDTree(self.ppla_df[['latitude', 'longitude']].values)
+        self.ppla2_tree = KDTree(self.ppla2_df[['latitude', 'longitude']].values)
+        
+        # Координаты Москвы и Питера для азимутов
+        self.moscow_coords = (55.7558, 37.6176)
+        self.spb_coords = (59.9343, 30.3351)
+
+    def calculate_azimuth(self, point_lat, point_lon, center_lat, center_lon):
+        """Вычисляем азимут от центральной точки до объекта"""
+        lon_diff = radians(point_lon - center_lon)
+        lat1 = radians(center_lat)
+        lat2 = radians(point_lat)
+        
+        x = sin(lon_diff) * cos(lat2)
+        y = cos(lat1) * sin(lat2) - sin(lat1) * cos(lat2) * cos(lon_diff)
+        azimuth = degrees(atan2(x, y))
+        
+        # Приводим к диапазону 0-360
+        return (azimuth + 360) % 360
+    
+    def get_reference_point_for_azimuth(self, region):
+        """Определяем точку отсчета для азимута в зависимости от региона"""
+        if 'московск' in region.lower():
+            return self.moscow_coords
+        elif 'ленинградск' in region.lower() or 'петербург' in region.lower():
+            return self.spb_coords
+        else:
+            # Для других регионов используем ближайший PPLA
+            return None  # Будем определять в основном методе
+
+    def calculate_nearest_cities(self, df):
+        """Вычисление ближайших городов (без преобразования в категории)"""
+        try:
+            # Проверка и подготовка данных
+            if not hasattr(self, 'ppla_tree') or not hasattr(self, 'ppla2_tree'):
+                raise ValueError("Деревья поиска городов не инициализированы")
+            
+            # Получаем координаты как numpy array
+            coords = df[['latitude', 'longitude']].values
+            
+            # 1. Находим ближайшие PPLA/PPLC
+            dist_ppla, idx_ppla = self.ppla_tree.query(coords, k=1)
+            ppla_info = self.ppla_df.iloc[idx_ppla[:, 0]]
+            
+            df['distanceToPPLA'] = [
+                self.haversine(lat, lon, p_lat, p_lon) 
+                for (lat, lon), (p_lat, p_lon) in zip(
+                    coords, 
+                    ppla_info[['latitude', 'longitude']].values
+                )
+            ]
+            df['nearestPPLA'] = ppla_info['name'].values  # Оставляем как обычные строки (object)
+            
+            # 2. Находим ближайшие PPLA2
+            dist_ppla2, idx_ppla2 = self.ppla2_tree.query(coords, k=1)
+            ppla2_info = self.ppla2_df.iloc[idx_ppla2[:, 0]]
+            
+            df['distanceToPPLA2'] = [
+                self.haversine(lat, lon, p_lat, p_lon) 
+                for (lat, lon), (p_lat, p_lon) in zip(
+                    coords, 
+                    ppla2_info[['latitude', 'longitude']].values
+                )
+            ]
+            df['nearestPPLA2'] = ppla2_info['name'].values  # Оставляем как обычные строки (object)
+            
+            # 3. Вычисляем азимут
+            azimut_data = []
+            for i in range(len(df)):
+                row = df.iloc[i]
+                region = row.get('region', '')
+                ref_point = self.get_reference_point_for_azimuth(region)
+                
+                if ref_point is None:
+                    # Используем ближайший PPLA как точку отсчета
+                    nearest_idx = idx_ppla[i, 0]
+                    ref_point = (
+                        self.ppla_df.iloc[nearest_idx]['latitude'], 
+                        self.ppla_df.iloc[nearest_idx]['longitude']
+                    )
+                
+                azimuth = self.calculate_azimuth(row['latitude'], row['longitude'], *ref_point)
+                azimut_data.append((sin(radians(azimuth)), cos(radians(azimuth))))
+            
+            df['azimut_sin'], df['azimut_cos'] = zip(*azimut_data)
+            
+            return df
+        
+        except Exception as e:
+            raise ValueError(f"Ошибка при расчете ближайших городов: {type(e).__name__}: {str(e)}")
+    
     def preprocess_base(self):
         """Базовые преобразования без нормализации и удаления выбросов"""
+
+        if 'region' not in self.df.columns:
+            self.df['region'] = 'Московская область'
+            
         # Step 1: Rename columns
         self.df.rename(columns=self.column_mapping, inplace=True)
 
-        # Step 2: Highway name restoring
-        self.df['nearestHighway'] = self.df['address'].apply(self.find_highway)
-        self.transformations['nearestHighway'] = {key: key for key in self.highways.values()}
-        
-        # Step 3: Drop rows
-        self.df = self.drop_rows(self.df)
-
-        # Step 4: Convert data types
+    
+        # Step 2: Convert data types FIRST
         self.df = self.convert_data_types(self.df)
-
+        
+        # Проверка координат перед расчетами
+        if self.df[['latitude', 'longitude']].isnull().any().any():
+            raise ValueError("Обнаружены пропущенные значения в координатах")
+        
+        # Step 3: Geo features
+        self.df = self.calculate_nearest_cities(self.df)
+        
+        # Step 4: Drop rows
+        self.df = self.drop_rows(self.df)
+    
         # Step 5: Recalculate MKAD distance
         self.df = self.distance_from_mkad(self.df)
-
+    
         # Step 6: Clean year of construction
         self.df = self.clean_year_of_construction(self.df)
-
-        # Step 8: Calculate nearest city and distance
-        self.df = self.calculate_nearest_city(self.df)
-        self.transformations['nearestCity'] = {city['name']: city['name'] for city in self.cities}
-
+    
         # Additional step - make columns lists for further functions
         self._update_object_columns(self.df)
-
-        # Step 10: Categorical replacements and conversions
+        print(self.object_columns)
+        # Step 7: Categorical replacements and conversions
         self.df, self.label_encoders = self.categorical_replacements_and_convertations(self.df)
-
+    
         return self.df
 
+    def categorical_replacements_and_convertations(self, df):
+        """
+        Handle categorical columns by either one-hot encoding or label encoding.
+        """
+        df = self.preprocess_rawa_cat(df)
+        
+        if self.one_hot_only is True:
+            for col in self.columns_with_commas:
+                df = self.split_and_map_columns(df, col, self.transformations)
+            
+            for col in [col for col in self.object_columns if col not in self.columns_with_commas]:
+                df = self.one_hot_encode_with_mappings(df, col, self.transformations)
+            return df, None
+        else:
+            label_encoders = {}
+            for col in self.not_always_one_hot:
+                df[col] = df[col].fillna('NaN')
+                label_encoder = LabelEncoder()
+                
+                df[col] = label_encoder.fit_transform(df[col])
+                
+                if 'NaN' in label_encoder.classes_:
+                    nan_index = list(label_encoder.classes_).index('NaN')
+                    df[col] = df[col].replace(nan_index, 0)
+                
+                label_encoders[col] = label_encoder
+            
+            for col in [col for col in self.object_columns if col not in self.not_always_one_hot]:
+                df = self.one_hot_encode_with_mappings(df, col, self.transformations)
+            return df, label_encoders
+
+    
     def prepare_for_model(self):
         """Подготовка данных для модели: пометка выбросов + нормализация"""
         self.df = self.df.reset_index()
         
         # Пометка выбросов вместо удаления
         if self.train:
-            self.df = self.mark_outliers(self.df, columns=['price','houseArea', 'landArea'])
+            self.df = self.mark_outliers(self.df, columns=['houseArea', 'landArea'])
         else:
-            self.df = self.mark_outliers(self.df, columns=['price','houseArea', 'landArea'])
+            self.df = self.mark_outliers(self.df, columns=['houseArea', 'landArea'])
         
         # Добавляем пространственные фичи (если включено)
         if self.use_hex_features:
@@ -250,7 +322,7 @@ class DataProcessingPipeline:
         
         # Логарифмическое преобразование (если нужно)
         if self.log_needed:
-            log_columns = ['houseArea', 'landArea', 'distanceFromMkad', 'distanceToCityKm', 'price']
+            log_columns = ['houseArea', 'landArea', 'distanceFromMkad', 'distanceToPPLA', 'distanceToPPLA2', 'price']
             if self.use_hex_features:
                 log_columns.extend([
                     'hex_price_median', 'hex_price_per_sqm', 'hex_price_per_land',
@@ -267,12 +339,12 @@ class DataProcessingPipeline:
             if self.use_hex_features:
                 columns_to_normalize = [
                     'houseArea', 'landArea', 'distanceFromMkad', 
-                    'year', 'distanceToCityKm', 'price'
+                    'year', 'distanceToPPLA', 'distanceToPPLA2', 'price'
                 ]
             else:
                 columns_to_normalize = [
                     'houseArea', 'landArea', 'distanceFromMkad', 
-                    'year', 'distanceToCityKm', 'hex_price_median', 'hex_price_per_sqm', 'hex_price_per_land',
+                    'year', 'distanceToPPLA', 'distanceToPPLA2', 'hex_price_median', 'hex_price_per_sqm', 'hex_price_per_land',
                     'neighbor_hex_price_median', 'neighbor_hex_price_per_sqm',
                     'neighbor_hex_price_per_land','price'
                 ]
@@ -303,7 +375,10 @@ class DataProcessingPipeline:
                 'outlier_bounds': self.fitted_outlier_bounds,
                 'scaler': self.scaler,
                 'lat_long_scaler': self.lat_long_scaler,
-                'hex_stats': self.hex_stats if self.use_hex_features else None
+                'hex_stats': self.hex_stats if self.use_hex_features else None,
+                'global_median_ppsm': self.global_median_ppsm if self.use_hex_features else None,
+                'global_median_ppland': self.global_median_ppland if self.use_hex_features else None,
+                'global_median_price': self.global_median_price if self.use_hex_features else None
             }
         else:
             return self.df.set_index('id')
@@ -355,9 +430,10 @@ class DataProcessingPipeline:
     
         # 2. Определяем маску не-выбросов (только для train)
         if self.train:
-            non_outliers_mask = ~(df['is_price_outlier'].astype(bool) | 
+            non_outliers_mask = ~(
                                 df['is_houseArea_outlier'].astype(bool) | 
-                                df['is_landArea_outlier'].astype(bool))
+                                df['is_landArea_outlier'].astype(bool)
+            )
             df_non_outliers = df[non_outliers_mask]
         else:
             df_non_outliers = df
@@ -431,7 +507,6 @@ class DataProcessingPipeline:
     
         # 11. Обработка выбросов - заполняем глобальными медианами
         outlier_mask = (
-            df['is_price_outlier'].astype(bool) |
             df['is_houseArea_outlier'].astype(bool) |
             df['is_landArea_outlier'].astype(bool)
         )
@@ -569,16 +644,7 @@ class DataProcessingPipeline:
         return None
 
     def drop_rows(self, df):
-        description_phrases = [
-            'построим', 'потсрою', 'вашему проекту', 'вашему тз', 'аукцион', 'торги',
-            'продам долю', '1/3 дома', '1/2 дома', '1/4 дома', '0.5 дома', 'половину дома',
-            'треть дома', 'четверть дома', '1/3 дачи', '1/2 дачи', '1/4 дачи', '0.5 дачи',
-            'половину дачи', 'треть дачи', 'четверть дачи'
-        ]
         sale_methods_to_drop = ['продажа доли', 'реализация на торгах']
-
-        for phrase in description_phrases:
-            df = df[~df['description_raw'].str.contains(phrase, case=False, na=False)]
 
         for phrase in sale_methods_to_drop:
             df = df[~df['saleMethod'].str.contains(phrase, case=False, na=False)]
@@ -588,20 +654,37 @@ class DataProcessingPipeline:
         return df
 
     def convert_data_types(self, df):
+        """Конвертация типов данных с проверкой координат"""
+        # Проверяем наличие необходимых колонок
+        required_columns = ['latitude', 'longitude', 'price', 'houseArea', 'landArea', 'year']
+        missing_cols = [col for col in required_columns if col not in df.columns]
+        if missing_cols:
+            raise ValueError(f"Отсутствуют обязательные колонки: {missing_cols}")
+    
+        # Конвертируем координаты в float
+        for col in ['latitude', 'longitude']:
+            df[col] = pd.to_numeric(df[col], errors='coerce')
+            if df[col].isnull().any():
+                raise ValueError(f"Некорректные значения в колонке {col}")
+    
+        # Остальные преобразования
         integer_columns = ['price']
-        float_columns = ['houseArea', 'landArea', 'distanceFromMkad', 'latitude', 'longitude', 'year']
-
+        float_columns = ['houseArea', 'landArea', 'distanceFromMkad', 'year']
+    
         for col in integer_columns:
-            if not pd.api.types.is_integer_dtype(df[col]):
-                df[col] = df[col].str.replace(',', '.', regex=False).str.replace(' ', '', regex=False).astype(int)
-
+            if col in df.columns:
+                df[col] = pd.to_numeric(df[col], errors='coerce').fillna(0).astype(int)
+    
         for col in float_columns:
-            if not pd.api.types.is_float_dtype(df[col]):
-                df[col] = df[col].str.replace(',', '.', regex=False).str.replace(' ', '', regex=False).astype(float)
-
-        df['rooms'] = df['rooms'].replace({'Свободная планировка': '0', '10 и больше': '10'}).astype(int)
-        df['floors'] = df['floors'].replace({'4 и больше': '4'}).astype(int)
-
+            if col in df.columns:
+                df[col] = pd.to_numeric(df[col], errors='coerce').fillna(0.0).astype(float)
+    
+        if 'rooms' in df.columns:
+            df['rooms'] = df['rooms'].replace({'Свободная планировка': '0', '10 и больше': '10'}).astype(int)
+        
+        if 'floors' in df.columns:
+            df['floors'] = df['floors'].replace({'4 и больше': '4'}).astype(int)
+    
         return df
 
     def haversine(self, lat1, lon1, lat2, lon2):
@@ -723,25 +806,6 @@ class DataProcessingPipeline:
                 mask &= (df[column] >= lower_bound) & (df[column] <= upper_bound)
         
         return df[mask]
-        
-    def nearest_city(self, latitude, longitude):
-        min_distance = float("inf")
-        nearestCity = None
-        
-        for city in self.cities:
-            distance = self.haversine(latitude, longitude, city["latitude"], city["longitude"])
-            if distance < min_distance:
-                min_distance = distance
-                nearestCity = city["name"]
-        
-        return min_distance, nearestCity
-
-    def calculate_nearest_city(self, df):
-        df[["distanceToCityKm", "nearestCity"]] = df.apply(
-            lambda row: pd.Series(self.nearest_city(row["latitude"], row["longitude"])),
-            axis=1
-        )
-        return df
 
 
     def normalization_logtransformation(self, df, norm_needed = True, log_needed = True):
@@ -773,9 +837,11 @@ class DataProcessingPipeline:
         
     def _update_object_columns(self, df):
         # Update object_columns
-        self.object_columns = [col for col in df.select_dtypes(include=['object']).columns 
-                         if col != 'description' and col != 'description_raw']
-    
+        self.object_columns = [
+            col for col in df.select_dtypes(include=['object', 'category']).columns 
+            if col not in ['description', 'description_raw', 'azimut_sin', 'azimut_cos']
+        ]
+            
         # Update columns_with_commas
         self.columns_with_commas = [col for col in self.object_columns if df[col].str.contains(',').any()]
     
@@ -874,39 +940,45 @@ class DataProcessingPipeline:
             
             # Drop the original column
             df.drop(columns=[column], inplace=True)
+        else:
+            # For columns without mappings, do regular one-hot encoding
+            if pd.api.types.is_categorical_dtype(df[column]):
+                categories = df[column].cat.categories
+            else:
+                categories = df[column].unique()
+            
+            for category in categories:
+                if category == exclude_value:
+                    continue
+                new_column_name = f"{column}_{category}"
+                df[new_column_name] = (df[column] == category).astype(int)
+            
+            df.drop(columns=[column], inplace=True)
         
         return df
     
-    def categorical_replacements_and_convertations(self, df):
+    def preprocess_rawa_cat(self, df):
         """
-        Handle categorical columns by either one-hot encoding or label encoding.
+        Preprocess categorical columns by filling null values based on the specified method.
         """
-        df = self.preprocess_rawa_cat(df)
+        for column, method in self.columns_to_not_fill_null.items():
+            if column not in df.columns:
+                raise ValueError(f"Column '{column}' not found in DataFrame.")
+            
+            if method == 'mode':
+                fill_value = df[column].mode()[0]
+                df[column] = df[column].fillna(fill_value)
+            else:
+                raise ValueError(f"Unsupported fill method: '{method}'. Supported methods: 'mode'.")
         
-        if self.one_hot_only is True:
-            for col in self.columns_with_commas:
-                df = self.split_and_map_columns(df, col, self.transformations)
+        # Fill remaining object columns with 'NaN' (но только если они не категориальные)
+        for column in [col for col in self.object_columns 
+                      if col not in self.columns_to_not_fill_null.keys() 
+                      and not pd.api.types.is_categorical_dtype(df[col])]:  # <- проверяем, что колонка не категориальная
+            df[column] = df[column].replace('нет', 'NaN')
+            df[column] = df[column].fillna('NaN')
             
-            for col in [col for col in self.object_columns if col not in self.columns_with_commas]:
-                df = self.one_hot_encode_with_mappings(df, col, self.transformations)
-            return df, None
-        else:
-            label_encoders = {}
-            for col in self.not_always_one_hot:
-                df[col] = df[col].fillna('NaN')
-                label_encoder = LabelEncoder()
-                
-                df[col] = label_encoder.fit_transform(df[col])
-                
-                if 'NaN' in label_encoder.classes_:
-                    nan_index = list(label_encoder.classes_).index('NaN')
-                    df[col] = df[col].replace(nan_index, 0)
-                
-                label_encoders[col] = label_encoder
-            
-            for col in [col for col in self.object_columns if col not in self.not_always_one_hot]:
-                df = self.one_hot_encode_with_mappings(df, col, self.transformations)
-            return df, label_encoders
+        return df
     
     def get_hexagon_stats(self) -> pd.DataFrame:
         """Возвращает статистики по гексагонам"""
