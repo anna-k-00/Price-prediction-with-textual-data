@@ -29,7 +29,9 @@ class DataProcessingPipeline:
         size_group_stats: Optional[pd.DataFrame] = None,
         global_median_ppsm: Optional[float] = None,
         global_median_ppland: Optional[float] = None,
-        global_median_price: Optional[float] = None
+        global_median_price: Optional[float] = None,
+        manual_text_params: bool = False,
+        manual_text_params_path: Optional[str] = None,
     ):
         self.df = df
         self.norm_needed = norm_needed
@@ -48,6 +50,18 @@ class DataProcessingPipeline:
         self.global_median_price = global_median_price
         self.cities_df = self._load_geonames_data()
         self._prepare_cities_kdtree()
+
+        self.manual_text_params = manual_text_params
+        self.manual_text_params_path = manual_text_params_path
+        # загружаем словарь, если надо
+        if self.manual_text_params:
+            if not self.manual_text_params_path:
+                raise ValueError("Если manual_text_params=True, нужно передать manual_text_params_path")
+            with open(self.manual_text_params_path, 'r', encoding='utf-8') as f:
+                self.manual_text_features_dict = json.load(f)
+        else:
+            self.manual_text_features_dict = {}
+
         
         self.column_mapping = {
             'id': 'id',
@@ -119,6 +133,18 @@ class DataProcessingPipeline:
             'wallMaterial': {'бревно': 'log', 'экспериментальные материалы': 'experimental', 'пеноблоки': 'foamBlock', 'металл': 'metal', 'сэндвич-панели': 'sandwichPanel', 'газоблоки': 'gasBlock', 'кирпич': 'brick', 'железобетонные панели': 'concretePanel', 'брус': 'timber'},
         }
 
+    def _add_manual_text_features(self, df: pd.DataFrame) -> pd.DataFrame:
+        """Добавляет бинарные колонки text_{key} по правилам из JSON."""
+        if not self.manual_text_params or 'description_raw' not in df.columns:
+            return df
+        df = df.copy()
+        text = df['description_raw'].astype(str).str.lower()
+        import re
+        for key, values in self.manual_text_features_dict.items():
+            pattern = '|'.join(re.escape(v.lower()) for v in values)
+            df[f"text_{key}"] = text.str.contains(pattern, na=False).astype(int)
+        return df
+        
     def _load_geonames_data(self):
         """Загружаем данные городов из Geonames"""
         url = "http://download.geonames.org/export/dump/RU.zip"
@@ -256,6 +282,8 @@ class DataProcessingPipeline:
         
         # Step 3: Geo features
         self.df = self.calculate_nearest_cities(self.df)
+
+        self.df = self._add_manual_text_features(self.df)
         
         # Step 4: Drop rows
         self.df = self.drop_rows(self.df)
@@ -644,7 +672,16 @@ class DataProcessingPipeline:
         return None
 
     def drop_rows(self, df):
+        description_phrases = [
+            'построим', 'потсрою', 'вашему проекту', 'вашему тз', 'аукцион', 'торги',
+            'продам долю', '1/3 дома', '1/2 дома', '1/4 дома', '0.5 дома', 'половину дома',
+            'треть дома', 'четверть дома', '1/3 дачи', '1/2 дачи', '1/4 дачи', '0.5 дачи',
+            'половину дачи', 'треть дачи', 'четверть дачи'
+        ]
         sale_methods_to_drop = ['продажа доли', 'реализация на торгах']
+
+        for phrase in description_phrases:
+            df = df[~df['description_raw'].str.contains(phrase, case=False, na=False)]
 
         for phrase in sale_methods_to_drop:
             df = df[~df['saleMethod'].str.contains(phrase, case=False, na=False)]
