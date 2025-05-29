@@ -907,6 +907,7 @@ class DataProcessingPipeline:
         Preprocess categorical columns by filling null values based on the specified method.
         """
         for column, method in self.columns_to_not_fill_null.items():
+            print(column)
             if column not in df.columns:
                 raise ValueError(f"Column '{column}' not found in DataFrame.")
             
