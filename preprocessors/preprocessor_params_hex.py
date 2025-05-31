@@ -1,3 +1,4 @@
+```python
 import pandas as pd
 import numpy as np
 from math import radians, sin, cos, sqrt, atan2, degrees
@@ -11,7 +12,7 @@ from zipfile import ZipFile
 import re
 import h3
 import json
-from typing import Dict, Optional  # Add this line
+from typing import Dict, Optional
 
 class DataProcessingPipeline:
     def __init__(
@@ -34,6 +35,28 @@ class DataProcessingPipeline:
         manual_text_params: bool = False,
         manual_text_params_path: Optional[str] = None,
     ):
+        """
+        Initialize the DataProcessingPipeline with the given DataFrame and processing parameters.
+        
+        Args:
+            df: Input DataFrame containing the raw data.
+            norm_needed: Whether to apply normalization.
+            log_needed: Whether to apply log transformation.
+            one_hot_only: Whether to use one-hot encoding exclusively.
+            train: Whether the pipeline is in training mode.
+            outlier_bounds: Precomputed bounds for outlier detection.
+            scaler: Pre-trained scaler for normalization.
+            lat_long_scaler: Pre-trained scaler for latitude/longitude.
+            use_hex_features: Whether to use H3 hexagon features.
+            hex_resolution: Resolution level for H3 hexagons.
+            hex_stats: Precomputed hexagon statistics.
+            size_group_stats: Precomputed size group statistics.
+            global_median_ppsm: Global median price per square meter.
+            global_median_ppland: Global median price per land area.
+            global_median_price: Global median price.
+            manual_text_params: Whether to use manual text features.
+            manual_text_params_path: Path to JSON file with text feature rules.
+        """
         self.df = df
         self.norm_needed = norm_needed
         self.log_needed = log_needed
@@ -54,16 +77,14 @@ class DataProcessingPipeline:
 
         self.manual_text_params = manual_text_params
         self.manual_text_params_path = manual_text_params_path
-        # загружаем словарь, если надо
         if self.manual_text_params:
             if not self.manual_text_params_path:
-                raise ValueError("Если manual_text_params=True, нужно передать manual_text_params_path")
+                raise ValueError("If manual_text_params=True, manual_text_params_path must be provided")
             with open(self.manual_text_params_path, 'r', encoding='utf-8') as f:
                 self.manual_text_features_dict = json.load(f)
         else:
             self.manual_text_features_dict = {}
 
-        
         self.column_mapping = {
             'id': 'id',
             'Количество комнат': 'rooms',
@@ -135,7 +156,15 @@ class DataProcessingPipeline:
         }
 
     def _add_manual_text_features(self, df: pd.DataFrame) -> pd.DataFrame:
-        """Добавляет бинарные колонки text_{key} по правилам из JSON."""
+        """
+        Add binary text features based on rules from the provided JSON dictionary.
+        
+        Args:
+            df: DataFrame containing the raw text data.
+            
+        Returns:
+            DataFrame with added binary text features.
+        """
         if not self.manual_text_params or 'description_raw' not in df.columns:
             return df
         df = df.copy()
@@ -147,7 +176,12 @@ class DataProcessingPipeline:
         return df
         
     def _load_geonames_data(self):
-        """Загружаем данные городов из Geonames"""
+        """
+        Load and preprocess city data from Geonames.
+        
+        Returns:
+            DataFrame containing filtered city data.
+        """
         url = "http://download.geonames.org/export/dump/RU.zip"
         response = requests.get(url)
         zipfile = ZipFile(BytesIO(response.content))
@@ -163,25 +197,35 @@ class DataProcessingPipeline:
         ]
         df.columns = columns
 
-        # Оставляем только города нужных типов
         cities_df = df[df['feature_code'].isin(['PPLC','PPLA','PPLA2'])]
         return cities_df[['name', 'latitude', 'longitude', 'feature_code', 'admin1_code']]
 
     def _prepare_cities_kdtree(self):
-        """Подготавливаем KDTree для быстрого поиска городов"""
-        # Создаем отдельные деревья для разных типов городов
+        """
+        Prepare KDTree structures for efficient city lookup based on coordinates.
+        """
         self.ppla_df = self.cities_df[self.cities_df['feature_code'].isin(['PPLC', 'PPLA'])]
         self.ppla2_df = self.cities_df[self.cities_df['feature_code'] == 'PPLA2']
         
         self.ppla_tree = KDTree(self.ppla_df[['latitude', 'longitude']].values)
         self.ppla2_tree = KDTree(self.ppla2_df[['latitude', 'longitude']].values)
         
-        # Координаты Москвы и Питера для азимутов
         self.moscow_coords = (55.7558, 37.6176)
         self.spb_coords = (59.9343, 30.3351)
 
     def calculate_azimuth(self, point_lat, point_lon, center_lat, center_lon):
-        """Вычисляем азимут от центральной точки до объекта"""
+        """
+        Calculate the azimuth angle from a center point to a target point.
+        
+        Args:
+            point_lat: Latitude of the target point.
+            point_lon: Longitude of the target point.
+            center_lat: Latitude of the center point.
+            center_lon: Longitude of the center point.
+            
+        Returns:
+            Azimuth angle in degrees (0-360).
+        """
         lon_diff = radians(point_lon - center_lon)
         lat1 = radians(center_lat)
         lat2 = radians(point_lat)
@@ -190,30 +234,41 @@ class DataProcessingPipeline:
         y = cos(lat1) * sin(lat2) - sin(lat1) * cos(lat2) * cos(lon_diff)
         azimuth = degrees(atan2(x, y))
         
-        # Приводим к диапазону 0-360
         return (azimuth + 360) % 360
     
     def get_reference_point_for_azimuth(self, region):
-        """Определяем точку отсчета для азимута в зависимости от региона"""
+        """
+        Determine the reference point for azimuth calculation based on region.
+        
+        Args:
+            region: String containing the region name.
+            
+        Returns:
+            Tuple of (latitude, longitude) or None if no specific reference point.
+        """
         if 'московск' in region.lower():
             return self.moscow_coords
         elif 'ленинградск' in region.lower() or 'петербург' in region.lower():
             return self.spb_coords
         else:
-            # Для других регионов используем ближайший PPLA
-            return None  # Будем определять в основном методе
+            return None
 
     def calculate_nearest_cities(self, df):
-        """Вычисление ближайших городов (без преобразования в категории)"""
-        try:
-            # Проверка и подготовка данных
-            if not hasattr(self, 'ppla_tree') or not hasattr(self, 'ppla2_tree'):
-                raise ValueError("Деревья поиска городов не инициализированы")
+        """
+        Calculate distances to nearest cities and azimuth angles for all properties.
+        
+        Args:
+            df: DataFrame containing property coordinates.
             
-            # Получаем координаты как numpy array
+        Returns:
+            DataFrame with added city distance and azimuth features.
+        """
+        try:
+            if not hasattr(self, 'ppla_tree') or not hasattr(self, 'ppla2_tree'):
+                raise ValueError("City search trees not initialized")
+            
             coords = df[['latitude', 'longitude']].values
             
-            # 1. Находим ближайшие PPLA/PPLC
             dist_ppla, idx_ppla = self.ppla_tree.query(coords, k=1)
             ppla_info = self.ppla_df.iloc[idx_ppla[:, 0]]
             
@@ -224,9 +279,8 @@ class DataProcessingPipeline:
                     ppla_info[['latitude', 'longitude']].values
                 )
             ]
-            df['nearestPPLA'] = ppla_info['name'].values  # Оставляем как обычные строки (object)
+            df['nearestPPLA'] = ppla_info['name'].values
             
-            # 2. Находим ближайшие PPLA2
             dist_ppla2, idx_ppla2 = self.ppla2_tree.query(coords, k=1)
             ppla2_info = self.ppla2_df.iloc[idx_ppla2[:, 0]]
             
@@ -237,9 +291,8 @@ class DataProcessingPipeline:
                     ppla2_info[['latitude', 'longitude']].values
                 )
             ]
-            df['nearestPPLA2'] = ppla2_info['name'].values  # Оставляем как обычные строки (object)
+            df['nearestPPLA2'] = ppla2_info['name'].values
             
-            # 3. Вычисляем азимут
             azimut_data = []
             for i in range(len(df)):
                 row = df.iloc[i]
@@ -247,7 +300,6 @@ class DataProcessingPipeline:
                 ref_point = self.get_reference_point_for_azimuth(region)
                 
                 if ref_point is None:
-                    # Используем ближайший PPLA как точку отсчета
                     nearest_idx = idx_ppla[i, 0]
                     ref_point = (
                         self.ppla_df.iloc[nearest_idx]['latitude'], 
@@ -262,43 +314,31 @@ class DataProcessingPipeline:
             return df
         
         except Exception as e:
-            raise ValueError(f"Ошибка при расчете ближайших городов: {type(e).__name__}: {str(e)}")
+            raise ValueError(f"Error calculating nearest cities: {type(e).__name__}: {str(e)}")
     
     def preprocess_base(self):
-        """Базовые преобразования без нормализации и удаления выбросов"""
-
+        """
+        Perform basic preprocessing steps without normalization or outlier removal.
+        
+        Returns:
+            Preprocessed DataFrame.
+        """
         if 'region' not in self.df.columns:
             self.df['region'] = 'Московская область'
             
-        # Step 1: Rename columns
         self.df.rename(columns=self.column_mapping, inplace=True)
-
-    
-        # Step 2: Convert data types FIRST
         self.df = self.convert_data_types(self.df)
         
-        # Проверка координат перед расчетами
         if self.df[['latitude', 'longitude']].isnull().any().any():
-            raise ValueError("Обнаружены пропущенные значения в координатах")
+            raise ValueError("Missing values found in coordinates")
         
-        # Step 3: Geo features
         self.df = self.calculate_nearest_cities(self.df)
-
         self.df = self._add_manual_text_features(self.df)
-        
-        # Step 4: Drop rows
         self.df = self.drop_rows(self.df)
-    
-        # Step 5: Recalculate MKAD distance
         self.df = self.distance_from_mkad(self.df)
-    
-        # Step 6: Clean year of construction
         self.df = self.clean_year_of_construction(self.df)
-    
-        # Additional step - make columns lists for further functions
         self._update_object_columns(self.df)
         print(self.object_columns)
-        # Step 7: Categorical replacements and conversions
         self.df, self.label_encoders = self.categorical_replacements_and_convertations(self.df)
     
         return self.df
@@ -306,6 +346,12 @@ class DataProcessingPipeline:
     def categorical_replacements_and_convertations(self, df):
         """
         Handle categorical columns by either one-hot encoding or label encoding.
+        
+        Args:
+            df: DataFrame containing categorical columns.
+            
+        Returns:
+            Tuple of (processed DataFrame, label encoders if used).
         """
         df = self.preprocess_rawa_cat(df)
         
@@ -336,20 +382,22 @@ class DataProcessingPipeline:
 
     
     def prepare_for_model(self):
-        """Подготовка данных для модели: пометка выбросов + нормализация"""
+        """
+        Prepare data for modeling by marking outliers, adding spatial features, and applying transformations.
+        
+        Returns:
+            Dictionary of processed data and trained objects (in train mode) or processed DataFrame (in apply mode).
+        """
         self.df = self.df.reset_index()
         
-        # Пометка выбросов вместо удаления
         if self.train:
             self.df = self.mark_outliers(self.df, columns=['houseArea', 'landArea'])
         else:
             self.df = self.mark_outliers(self.df, columns=['houseArea', 'landArea'])
         
-        # Добавляем пространственные фичи (если включено)
         if self.use_hex_features:
             self.df = self._calculate_hexagon_metrics(self.df)
         
-        # Логарифмическое преобразование (если нужно)
         if self.log_needed:
             log_columns = ['houseArea', 'landArea', 'distanceFromMkad', 'distanceToPPLA', 'distanceToPPLA2', 'price']
             if self.use_hex_features:
@@ -363,7 +411,6 @@ class DataProcessingPipeline:
                 if col in self.df.columns:
                     self.df[col] = np.log1p(self.df[col])
         
-        # Нормализация (если нужно)
         if self.norm_needed:
             if self.use_hex_features:
                 columns_to_normalize = [
@@ -390,14 +437,13 @@ class DataProcessingPipeline:
                 )
             else:
                 if self.scaler is None or self.lat_long_scaler is None:
-                    raise ValueError("Для тестовых данных необходимо передать обученные скалеры")
+                    raise ValueError("For test data, trained scalers must be provided")
                 
                 self.df[columns_to_normalize] = self.scaler.transform(self.df[columns_to_normalize])
                 self.df[['latitude', 'longitude']] = self.lat_long_scaler.transform(
                     self.df[['latitude', 'longitude']]
                 )
         
-        # Возвращаем результаты
         if self.train:
             return {
                 'processed_df': self.df.set_index('id'),
@@ -414,26 +460,29 @@ class DataProcessingPipeline:
 
     def mark_outliers(self, df, columns, lower_percentile=0.01, upper_percentile=0.99):
         """
-        Mark outliers in multiple columns of a DataFrame instead of removing them.
-        In train mode: calculates and saves bounds
-        In apply mode: uses pre-calculated bounds
+        Mark outliers in specified columns instead of removing them.
+        
+        Args:
+            df: DataFrame to process.
+            columns: List of columns to check for outliers.
+            lower_percentile: Lower percentile threshold.
+            upper_percentile: Upper percentile threshold.
+            
+        Returns:
+            DataFrame with outlier flags added.
         """
         if self.train:
-            # Режим обучения - вычисляем границы
             bounds = {}
             for column in columns:
                 lower_bound = df[column].quantile(lower_percentile)
                 upper_bound = df[column].quantile(upper_percentile)
                 bounds[column] = (lower_bound, upper_bound)
             
-            # Сохраняем вычисленные границы
             self.fitted_outlier_bounds = bounds
             
-            # Создаем колонки с метками выбросов
             for column, (lower_bound, upper_bound) in bounds.items():
                 df[f'is_{column}_outlier'] = ((df[column] < lower_bound) | (df[column] > upper_bound)).astype(int)
         else:
-            # Режим применения - используем предварительно вычисленные границы
             if not self.outlier_bounds:
                 raise ValueError("Outlier bounds must be provided in apply mode")
             
@@ -447,17 +496,23 @@ class DataProcessingPipeline:
         return df
 
     def _calculate_hexagon_metrics(self, df: pd.DataFrame) -> pd.DataFrame:
-        """Переработанная версия с надежным объединением данных"""
+        """
+        Calculate H3 hexagon-based spatial features for the properties.
+        
+        Args:
+            df: DataFrame containing property coordinates.
+            
+        Returns:
+            DataFrame with added hexagon-based features.
+        """
         if not self.use_hex_features:
             return df
     
-        # 1. Создаем гексагоны для всех объектов
         df['hex_id'] = df.apply(
             lambda row: h3.latlng_to_cell(row['latitude'], row['longitude'], self.hex_resolution),
             axis=1
         )
     
-        # 2. Определяем маску не-выбросов (только для train)
         if self.train:
             non_outliers_mask = ~(
                                 df['is_houseArea_outlier'].astype(bool) | 
@@ -467,10 +522,8 @@ class DataProcessingPipeline:
         else:
             df_non_outliers = df
     
-        # 3. Расчет количества объектов в гексагонах (без выбросов)
         hex_counts = df_non_outliers['hex_id'].value_counts().rename('hex_property_count')
         
-        # 4. Расчет базовых статистик (только на не-выбросах)
         hex_stats = df_non_outliers.groupby('hex_id').agg({
             'price': 'median',
             'houseArea': 'median',
@@ -481,10 +534,8 @@ class DataProcessingPipeline:
             'landArea': 'hex_median_land_area'
         })
     
-        # 5. Добавляем количество объектов в статистики
         hex_stats = hex_stats.join(hex_counts)
     
-        # 6. Расчет производных метрик
         hex_stats['hex_price_per_sqm'] = (
             hex_stats['hex_price_median'] / 
             hex_stats['hex_median_house_area'].replace(0, np.nan)
@@ -494,7 +545,6 @@ class DataProcessingPipeline:
             hex_stats['hex_median_land_area'].replace(0, np.nan)
         )
     
-        # 7. Расчет глобальных медиан (только на train)
         if self.train:
             df_non_outliers['price_per_sqm'] = np.where(
                 df_non_outliers['houseArea'] > 0,
@@ -510,7 +560,6 @@ class DataProcessingPipeline:
             self.global_median_ppland = df_non_outliers['price_per_land'].median()
             self.global_median_price = df_non_outliers['price'].median()
     
-        # 8. Заполнение пропусков в статистиках
         hex_stats = hex_stats.fillna({
             'hex_price_median': self.global_median_price,
             'hex_price_per_sqm': self.global_median_ppsm,
@@ -520,13 +569,10 @@ class DataProcessingPipeline:
             'hex_property_count': 0
         })
     
-        # 9. Сохранение статистик для теста
         self.hex_stats = hex_stats.copy()
     
-        # 10. Объединение с основными данными (надежный способ)
         hex_stats_reset = hex_stats.reset_index()
         
-        # Объединяем все статистики за один шаг
         df = df.merge(
             hex_stats_reset,
             on='hex_id',
@@ -534,13 +580,11 @@ class DataProcessingPipeline:
             suffixes=('', '_y')
         )
     
-        # 11. Обработка выбросов - заполняем глобальными медианами
         outlier_mask = (
             df['is_houseArea_outlier'].astype(bool) |
             df['is_landArea_outlier'].astype(bool)
         )
     
-        # Заполняем все hex-метрики для выбросов глобальными медианами
         hex_metric_cols = [
             'hex_price_median', 'hex_price_per_sqm', 'hex_price_per_land',
             'hex_median_house_area', 'hex_median_land_area', 'hex_property_count'
@@ -553,10 +597,9 @@ class DataProcessingPipeline:
                 self.global_median_ppland if 'land' in col else
                 df_non_outliers['houseArea'].median() if 'house_area' in col else
                 df_non_outliers['landArea'].median() if 'land_area' in col else
-                0  # для hex_property_count
+                0
             )
     
-        # 12. Расчет статистик соседей
         neighbor_stats = []
         for hex_id in hex_stats.index:
             neighbors = h3.grid_disk(hex_id, 1)
@@ -588,7 +631,6 @@ class DataProcessingPipeline:
         neighbor_stats_df = pd.DataFrame(neighbor_stats)
         df = df.merge(neighbor_stats_df, on='hex_id', how='left')
     
-        # 13. Для выбросов заполняем neighbor-метрики глобальными медианами
         for col in ['neighbor_hex_price_median', 'neighbor_hex_price_per_sqm', 'neighbor_hex_price_per_land']:
             df.loc[outlier_mask & df[col].isna(), col] = (
                 self.global_median_price if 'median' in col else
@@ -596,9 +638,7 @@ class DataProcessingPipeline:
                 self.global_median_ppland
             )
     
-        # 14. Удаление временных колонок
         drop_cols = ['hex_id']
-        # Удаляем дубликаты столбцов
         for col in df.columns:
             if col.endswith('_y'):
                 original_col = col[:-2]
@@ -609,52 +649,24 @@ class DataProcessingPipeline:
         return df.drop(columns=drop_cols, errors='ignore')
         
     def process_for_ml(self):
-        # description_data = self.df[['id', 'description']].set_index('id').copy()
-        
-        # Step 1: Rename columns
         self.df.rename(columns=self.column_mapping, inplace=True)
-
-        # Step 2: Highway name restoring
         self.df['nearestHighway'] = self.df['address'].apply(self.find_highway)
         self.transformations['nearestHighway'] = {key: key for key in self.highways.values()}
-        
-        # Step 3: Drop rows
         self.df = self.drop_rows(self.df)
-
-        # Step 4: Convert data types
         self.df = self.convert_data_types(self.df)
-
-        # Step 5: Recalculate MKAD distance
         self.df = self.distance_from_mkad(self.df)
-
-        # Step 6: Clean year of construction
         self.df = self.clean_year_of_construction(self.df)
-
-        # Step 7: Remove outliers (теперь сохраняет или применяет границы)
         self.df = self.remove_outliers(self.df, columns=['price', 'houseArea', 'landArea'])
-
-        # Step 8: Calculate nearest city and distance
         self.df = self.calculate_nearest_city(self.df)
         self.transformations['nearestCity'] = {city['name']: city['name'] for city in self.cities}
-        
-        # Step 9: Normalization and log transformation
         self.df = self.normalization_logtransformation(self.df, self.norm_needed, self.log_needed)
-
-        # Additional step - make columns lists for further functions
         self._update_object_columns(self.df)
-
-        # Step 10: Categorical replacements and conversions
         self.df, self.label_encoders = self.categorical_replacements_and_convertations(self.df)
-
-        # self.df = self.df.join(description_data)
 
         return self.df
 
     def restore(self):
-        # Step 1: Reverse categorical replacements and conversions
         df = self.reverse_categorical_replacements_and_convertations(self.df)
-
-        # Step 2: Reverse normalization and log transformation
         df = self.reverse_normalization_logtransformation(self.df, self.norm_needed, self.log_needed)
 
         return df
@@ -692,20 +704,25 @@ class DataProcessingPipeline:
         return df
 
     def convert_data_types(self, df):
-        """Конвертация типов данных с проверкой координат"""
-        # Проверяем наличие необходимых колонок
+        """
+        Convert columns to appropriate data types with coordinate validation.
+        
+        Args:
+            df: DataFrame to process.
+            
+        Returns:
+            DataFrame with converted data types.
+        """
         required_columns = ['latitude', 'longitude', 'price', 'houseArea', 'landArea', 'year']
         missing_cols = [col for col in required_columns if col not in df.columns]
         if missing_cols:
-            raise ValueError(f"Отсутствуют обязательные колонки: {missing_cols}")
+            raise ValueError(f"Missing required columns: {missing_cols}")
     
-        # Конвертируем координаты в float
         for col in ['latitude', 'longitude']:
             df[col] = pd.to_numeric(df[col], errors='coerce')
             if df[col].isnull().any():
-                raise ValueError(f"Некорректные значения в колонке {col}")
+                raise ValueError(f"Invalid values in column {col}")
     
-        # Остальные преобразования
         integer_columns = ['price']
         float_columns = ['houseArea', 'landArea', 'distanceFromMkad', 'year']
     
@@ -728,20 +745,36 @@ class DataProcessingPipeline:
     def haversine(self, lat1, lon1, lat2, lon2):
         """
         Calculate the great circle distance between two points on the Earth.
+        
+        Args:
+            lat1: Latitude of point 1.
+            lon1: Longitude of point 1.
+            lat2: Latitude of point 2.
+            lon2: Longitude of point 2.
+            
+        Returns:
+            Distance in kilometers.
         """
         lat1, lon1, lat2, lon2 = map(radians, [lat1, lon1, lat2, lon2])
         dlat = lat2 - lat1
         dlon = lon2 - lon1
         a = sin(dlat / 2) ** 2 + cos(lat1) * cos(lat2) * sin(dlon / 2) ** 2
         c = 2 * atan2(sqrt(a), sqrt(1 - a))
-        radius = 6371  # Earth's radius in kilometers
+        radius = 6371
         distance = radius * c
         return distance
 
     def distance_to_polygon(self, latitude, longitude, polygon=None):
         """
-        Calculate the distance from a point to a polygon (default is MKAD polygon).
-        If the point is inside the polygon, the distance is 0.
+        Calculate distance from a point to a polygon (default is MKAD polygon).
+        
+        Args:
+            latitude: Point latitude.
+            longitude: Point longitude.
+            polygon: Optional custom polygon (defaults to MKAD polygon).
+            
+        Returns:
+            Distance in kilometers (0 if point is inside polygon).
         """
         if polygon is None:
             polygon = self.mkad_polygon
@@ -760,7 +793,13 @@ class DataProcessingPipeline:
 
     def distance_from_mkad(self, df):
         """
-        Recalculate the distance from MKAD for each row in the DataFrame.
+        Recalculate distance from MKAD for each property in the DataFrame.
+        
+        Args:
+            df: DataFrame containing property coordinates.
+            
+        Returns:
+            DataFrame with updated distanceFromMkad values.
         """
         for index, row in df.iterrows():
             if not pd.isna(row['latitude']) and not pd.isna(row['longitude']):
@@ -770,68 +809,72 @@ class DataProcessingPipeline:
         return df
 
     def clean_year_of_construction(self, df):
+        """
+        Clean and standardize year of construction values.
+        
+        Args:
+            df: DataFrame containing year values.
+            
+        Returns:
+            DataFrame with cleaned year values.
+        """
         median_year = df['year'].median()
         df['yearIsNull'] = df['year'].isna()
         df['yearIsNull'] = df['yearIsNull'].astype(int)
         df['year'] = df['year'].fillna(median_year)
-        
-        # Replace null values with mode
         df['year'] = df['year'].fillna(median_year)
         
-        # Replace 0 with mode
         df['year'] = np.where(
             df['year'] == 0,
             median_year,
             df['year']
         )
         
-        # Replace values larger than 2025 with 2025
         df['year'] = df['year'].clip(upper=2025)
         
-        # Function to handle year formats with regex
         def fix_year(year): 
             if pd.isna(year):
                 return year
             year = int(year)
-            if 25 < year < 100:  # e.g., 96 → 1996, 87 → 1987
+            if 25 < year < 100:
                 return 1900 + year
-            elif 0 <= year <= 25:  # e.g., 2 → 2002, 12 → 2012, 23 → 2023
+            elif 0 <= year <= 25:
                 return 2000 + year
-            elif 100 <= year < 1000:  # e.g., 207 → 2007, 209 → 2009, 216 → 2016
+            elif 100 <= year < 1000:
                 return 2000 + (year % 100)
             else:
                 return year
         
-        # Apply the fix_year function to the column
         df['year'] = df['year'].apply(fix_year)
         df['year']=df['year'].astype(int)
         return df
-        # integer_columns.append('yearIsNull')
-
     
     def remove_outliers(self, df, columns, lower_percentile=0.01, upper_percentile=0.99):
         """
-        Remove the lower and upper percentiles from multiple columns in a DataFrame.
-        In train mode: calculates and saves bounds
-        In apply mode: uses pre-calculated bounds
+        Remove outliers from specified columns based on percentile thresholds.
+        
+        Args:
+            df: DataFrame to process.
+            columns: List of columns to check for outliers.
+            lower_percentile: Lower percentile threshold.
+            upper_percentile: Upper percentile threshold.
+            
+        Returns:
+            Filtered DataFrame with outliers removed.
         """
         if self.train:
-            # Режим обучения - вычисляем границы
             bounds = {}
             for column in columns:
                 lower_bound = df[column].quantile(lower_percentile)
                 upper_bound = df[column].quantile(upper_percentile)
                 bounds[column] = (lower_bound, upper_bound)
             
-            # Сохраняем вычисленные границы
             self.fitted_outlier_bounds = bounds
             
-            # Фильтруем данные
             mask = pd.Series(True, index=df.index)
             for column, (lower_bound, upper_bound) in bounds.items():
                 mask &= (df[column] >= lower_bound) & (df[column] <= upper_bound)
         else:
-            # Режим применения - используем предварительно вычисленные границы
             if not self.outlier_bounds:
                 raise ValueError("Outlier bounds must be provided in apply mode")
             
@@ -847,12 +890,18 @@ class DataProcessingPipeline:
 
 
     def normalization_logtransformation(self, df, norm_needed = True, log_needed = True):
-        print(norm_needed, log_needed)
         """
         Apply log transformation and normalization to the DataFrame.
-        - Latitude and longitude are normalized to a range of -1 to 1.
-        - Other columns are normalized to a range of 0 to 1.
+        
+        Args:
+            df: DataFrame to transform.
+            norm_needed: Whether to apply normalization.
+            log_needed: Whether to apply log transformation.
+            
+        Returns:
+            Transformed DataFrame.
         """
+        print(norm_needed, log_needed)
         if log_needed:
             df['houseArea'] = np.log1p(df['houseArea'])
             df['landArea'] = np.log1p(df['landArea'])
@@ -861,12 +910,10 @@ class DataProcessingPipeline:
             df['price'] = np.log1p(df['price'])
 
         if norm_needed:
-            # Normalization for columns to [0, 1]
             self.scaler = MinMaxScaler(feature_range=(0, 1))
             columns_to_normalize = ['houseArea', 'landArea', 'distanceFromMkad', 'year', 'distanceToCityKm', 'price']
             df[columns_to_normalize] = self.scaler.fit_transform(df[columns_to_normalize])
 
-            # Normalization for latitude and longitude to [-1, 1]
             self.lat_long_scaler = MinMaxScaler(feature_range=(-1, 1))
             df[['latitude', 'longitude']] = self.lat_long_scaler.fit_transform(df[['latitude', 'longitude']])
 
@@ -874,25 +921,22 @@ class DataProcessingPipeline:
 
         
     def _update_object_columns(self, df):
-        # Update object_columns
+        """
+        Update lists of object columns and their processing categories.
+        """
         self.object_columns = [
             col for col in df.select_dtypes(include=['object', 'category']).columns 
             if col not in ['description', 'description_raw', 'azimut_sin', 'azimut_cos']
         ]
             
-        # Update columns_with_commas
         self.columns_with_commas = [col for col in self.object_columns if df[col].str.contains(',').any()]
     
-        # Update columns_with_few_unique_values
         columns_with_few_unique_values = [col for col in self.object_columns if df[col].nunique() <= 2]
     
-        # Update always_one_hot
         self.always_one_hot = self.columns_with_commas + columns_with_few_unique_values
     
-        # Update not_always_one_hot
         self.not_always_one_hot = [col for col in self.object_columns if col not in self.always_one_hot]
     
-        # Update columns_to_not_fill_null
         self.columns_to_not_fill_null = {
             'category': 'mode',
             'seller': 'mode',
@@ -904,20 +948,24 @@ class DataProcessingPipeline:
     
     def preprocess_rawa_cat(self, df):
         """
-        Preprocess categorical columns by filling null values based on the specified method.
+        Preprocess categorical columns by filling null values appropriately.
+        
+        Args:
+            df: DataFrame containing categorical columns.
+            
+        Returns:
+            DataFrame with filled null values.
         """
         for column, method in self.columns_to_not_fill_null.items():
-            print(column)
             if column not in df.columns:
                 raise ValueError(f"Column '{column}' not found in DataFrame.")
             
             if method == 'mode':
-                fill_value = df[column].mode()[0]  # mode() returns a Series; take the first value
+                fill_value = df[column].mode()[0]
                 df[column] = df[column].fillna(fill_value)
             else:
                 raise ValueError(f"Unsupported fill method: '{method}'. Supported methods: 'mode'.")
         
-        # Fill remaining object columns with 'нет'
         for column in [col for col in self.object_columns if col not in self.columns_to_not_fill_null.keys()]:
             df[column] = df[column].replace('нет', 'NaN')
             df[column] = df[column].fillna('NaN')
@@ -926,61 +974,68 @@ class DataProcessingPipeline:
     
     def split_and_map_columns(self, df, column, mappings):
         """
-        Split a column by commas and map its values to new binary columns.
+        Split comma-separated values and create binary columns for each value.
+        
+        Args:
+            df: DataFrame containing the column to split.
+            column: Name of the column to process.
+            mappings: Dictionary of value mappings.
+            
+        Returns:
+            DataFrame with original column replaced by binary columns.
         """
-        # Split the column values by commas and create lists
         df[column] = df[column].str.split(',')
     
-        # Create new columns for each unique value (excluding 'нет' and 'NaN')
         for index, row in df.iterrows():
-            if isinstance(row[column], list):  # Check if the value is a list
+            if isinstance(row[column], list):
                 for value in row[column]:
-                    value = value.strip()  # Remove any leading/trailing whitespace
+                    value = value.strip()
                     
-                    # Skip 'NaN' values
                     if value == 'NaN':
                         continue
                     
-                    # Get the mapped value
                     mapped_value = mappings.get(column, {}).get(value, value)
                     new_column_name = f"{column}_{mapped_value}"
-                    df.at[index, new_column_name] = 1  # Set the value to 1
+                    df.at[index, new_column_name] = 1
     
-        # Fill NaN values in the new columns with 0
         new_columns = [col for col in df.columns if col.startswith(f"{column}_")]
         df[new_columns] = df[new_columns].fillna(0).astype(int)
     
-        # Drop the original column if no longer needed
         df.drop(columns=[column], inplace=True)
     
         return df
     
     def one_hot_encode_with_mappings(self, df, column, mappings, exclude_value='NaN'):
         """
-        One-hot encode a column based on the provided mappings.
+        One-hot encode a column using provided value mappings.
+        
+        Args:
+            df: DataFrame containing the column to encode.
+            column: Name of the column to process.
+            mappings: Dictionary of value mappings.
+            exclude_value: Value to exclude from encoding.
+            
+        Returns:
+            DataFrame with original column replaced by binary columns.
         """
         if column in mappings.keys():
-            # Create new columns for each mapped value (excluding the excluded value)
             for value, mapped_value in mappings[column].items():
                 if value == exclude_value:
-                    continue  # Skip creating a column for the excluded value
+                    continue
                 
                 new_column_name = f"{column}_{mapped_value}"
                 df[new_column_name] = (df[column] == value).astype(int)
             
-            # Handle rows where the column value is the excluded value
             exclude_mask = df[column] == exclude_value
             if exclude_mask.any():
                 for value, mapped_value in mappings[column].items():
                     if value == exclude_value:
-                        continue  # Skip the excluded value
+                        continue
                     new_column_name = f"{column}_{mapped_value}"
                     df.loc[exclude_mask, new_column_name] = 0
             
-            # Drop the original column
             df.drop(columns=[column], inplace=True)
         else:
-            # For columns without mappings, do regular one-hot encoding
             if pd.api.types.is_categorical_dtype(df[column]):
                 categories = df[column].cat.categories
             else:
@@ -998,7 +1053,13 @@ class DataProcessingPipeline:
     
     def preprocess_rawa_cat(self, df):
         """
-        Preprocess categorical columns by filling null values based on the specified method.
+        Preprocess categorical columns by filling null values appropriately.
+        
+        Args:
+            df: DataFrame containing categorical columns.
+            
+        Returns:
+            DataFrame with filled null values.
         """
         for column, method in self.columns_to_not_fill_null.items():
             if column not in df.columns:
@@ -1010,17 +1071,21 @@ class DataProcessingPipeline:
             else:
                 raise ValueError(f"Unsupported fill method: '{method}'. Supported methods: 'mode'.")
         
-        # Fill remaining object columns with 'NaN' (но только если они не категориальные)
         for column in [col for col in self.object_columns 
                       if col not in self.columns_to_not_fill_null.keys() 
-                      and not pd.api.types.is_categorical_dtype(df[col])]:  # <- проверяем, что колонка не категориальная
+                      and not pd.api.types.is_categorical_dtype(df[col])]:
             df[column] = df[column].replace('нет', 'NaN')
             df[column] = df[column].fillna('NaN')
             
         return df
     
     def get_hexagon_stats(self) -> pd.DataFrame:
-        """Возвращает статистики по гексагонам"""
+        """
+        Get statistics calculated for H3 hexagons.
+        
+        Returns:
+            DataFrame containing hexagon statistics.
+        """
         if not self.use_hex_features:
             raise ValueError("Hex features were not calculated (use_hex_features=False)")
         if self.hex_stats is None:
@@ -1029,7 +1094,12 @@ class DataProcessingPipeline:
 
     
     def get_hexagon_geojson(self) -> Dict:
-        """Генерирует GeoJSON для визуализации гексагонов"""
+        """
+        Generate GeoJSON for visualizing hexagons.
+        
+        Returns:
+            Dictionary containing GeoJSON data.
+        """
         if not self.use_hex_features or self.hex_stats is None:
             raise ValueError("Hex features not available")
         
@@ -1054,6 +1124,15 @@ class DataProcessingPipeline:
         }
         
     def show_hexagons(df):
+        """
+        Visualize hexagons on a Folium map.
+        
+        Args:
+            df: DataFrame containing hexagon data.
+            
+        Returns:
+            Folium map object.
+        """
         m = folium.Map(location=[df['latitude'].mean(), df['longitude'].mean()], zoom_start=11)
         for hex_id in df['hex_id'].unique():
             boundary = h3.cell_to_boundary(hex_id)
@@ -1066,51 +1145,58 @@ class DataProcessingPipeline:
         return m
     
     def auto_select_resolution(df, target_samples=5):
-        for res in range(10, 7, -1):  # Проверяем от 10 до 8 разрешения
+        """
+        Automatically select H3 resolution based on target sample size.
+        
+        Args:
+            df: DataFrame containing coordinates.
+            target_samples: Minimum number of samples per hexagon.
+            
+        Returns:
+            Selected H3 resolution level.
+        """
+        for res in range(10, 7, -1):
             hex_ids = df.apply(lambda r: h3.latlng_to_cell(r['latitude'], r['longitude'], res), axis=1)
             if hex_ids.value_counts().min() >= target_samples:
                 return res
-        return 8  # Возвращаем минимальное разумное разрешение
+        return 8
     
 
     def reverse_categorical_replacements_and_convertations(self, df):
         """
-        Reverse the categorical transformations applied to the DataFrame.
+        Reverse categorical transformations applied to the DataFrame.
+        
+        Args:
+            df: DataFrame with transformed categorical columns.
+            
+        Returns:
+            DataFrame with original categorical values restored.
         """
-        # Reverse label encoding
         if self.label_encoders:
             for col, label_encoder in self.label_encoders.items():
                 if col in [col.split('_')[0] for col in df.columns if col in self.object_columns]:
-                    # Inverse transform the encoded values
                     df[col] = label_encoder.inverse_transform(df[col])
                     
-                    # If the column was transformed using mappings, apply the reverse mapping
                     if col in self.transformations.keys():
                         reverse_mapping = self.transformations[col]
                         df[col] = df[col].map(reverse_mapping).fillna(df[col])
     
-        # Reverse one-hot encoding for columns not in columns_with_commas
         for col in df.columns:
-            if '_' in col and col in self.object_columns:  # Check if the column is one-hot encoded
-                original_col = col.split('_')[0]  # Extract the original column name
+            if '_' in col and col in self.object_columns:
+                original_col = col.split('_')[0]
                 
-                # Skip columns that were split by commas
                 if original_col in self.columns_with_commas:
                     continue
                 
-                # Initialize the original column if it doesn't exist
                 if original_col not in df.columns:
                     df[original_col] = None
                 
-                # Combine one-hot encoded columns back into the original column
                 for _, row in df.iterrows():
                     if row[col] == 1:
-                        df.at[_, original_col] = col.split('_', 1)[1]  # Extract the value after the first underscore
+                        df.at[_, original_col] = col.split('_', 1)[1]
                 
-                # Drop the one-hot encoded column
                 df.drop(columns=[col], inplace=True)
     
-        # Fill remaining object columns with 'NaN'
         df[[col for col in self.object_columns if col not in self.columns_with_commas and col in df.columns]] = df[
             [col for col in self.object_columns if col not in self.columns_with_commas and col in df.columns]
         ].fillna('NaN')
@@ -1119,29 +1205,33 @@ class DataProcessingPipeline:
     
     def reverse_normalization_logtransformation(self, df, norm_needed = True, log_needed = True):
         """
-        Reverse the log transformation and normalization applied to the DataFrame.
-        - Latitude and longitude are denormalized from [-1, 1].
-        - Other columns are denormalized from [0, 1].
+        Reverse log transformation and normalization applied to the DataFrame.
+        
+        Args:
+            df: DataFrame with transformed values.
+            norm_needed: Whether normalization was applied.
+            log_needed: Whether log transformation was applied.
+            
+        Returns:
+            DataFrame with original scale values restored.
         """
         print(norm_needed, log_needed)
         if norm_needed:
-            # Reverse normalization for columns normalized to [0, 1]
             if self.scaler is None:
                 raise ValueError("Scaler is not fitted. Call 'normalization_logtransformation' first.")
             
             columns_to_normalize = ['houseArea', 'landArea', 'distanceFromMkad', 'year', 'distanceToCityKm', 'price']
             df[columns_to_normalize] = self.scaler.inverse_transform(df[columns_to_normalize])
 
-            # Reverse normalization for latitude and longitude normalized to [-1, 1]
             if self.lat_long_scaler is None:
                 raise ValueError("Latitude/Longitude scaler is not fitted. Call 'normalization_logtransformation' first.")
             df[['latitude', 'longitude']] = self.lat_long_scaler.inverse_transform(df[['latitude', 'longitude']])
         if log_needed:
-            # Reverse log transformation
             df['houseArea'] = np.expm1(df['houseArea'])
             df['landArea'] = np.expm1(df['landArea'])
-            df['distanceFromMkad'] = np.expm1(df['distanceFromMkad']) - 1  # Subtract 1 to reverse the +1 adjustment
-            df['distanceToCityKm'] = np.expm1(df['distanceToCityKm']) - 1  # Subtract 1 to reverse the +1 adjustment
+            df['distanceFromMkad'] = np.expm1(df['distanceFromMkad']) - 1
+            df['distanceToCityKm'] = np.expm1(df['distanceToCityKm']) - 1
             df['price'] = np.expm1(df['price'])
 
         return df
+```
