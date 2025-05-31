@@ -13,6 +13,10 @@ import h3
 import json
 from typing import Dict, Optional
 
+import nltk
+nltk.download('punkt')
+nltk.download('stopwords')
+
 class DataProcessingPipeline:
     def __init__(
         self,
