@@ -45,6 +45,8 @@ import platform
 import psutil
 import threading
 from resource_monitor import ResourceMonitor
+from ANN import ANNRegressor
+
 
 
 try:
