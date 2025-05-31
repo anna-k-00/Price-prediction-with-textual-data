@@ -14,8 +14,7 @@ import json
 from typing import Dict, Optional
 
 import nltk
-nltk.download('punkt')
-nltk.download('stopwords')
+nltk.download('punkt_tab')
 
 class DataProcessingPipeline:
     def __init__(
