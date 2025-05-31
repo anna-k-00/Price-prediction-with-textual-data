@@ -1,4 +1,3 @@
-```python
 import pandas as pd
 import numpy as np
 from math import radians, sin, cos, sqrt, atan2, degrees
