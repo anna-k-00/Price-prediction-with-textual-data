@@ -1233,4 +1233,3 @@ class DataProcessingPipeline:
             df['price'] = np.expm1(df['price'])
 
         return df
-```
