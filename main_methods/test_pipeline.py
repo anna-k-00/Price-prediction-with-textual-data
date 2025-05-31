@@ -680,7 +680,7 @@ class PricePredictionExperiment:
             html_output = ""
             for i, text_importance in enumerate(importance):
                 tokens, scores = zip(*text_importance)
-                html_output += f"<h3>Text {i+1}</h3><div style='border:1px solid #ccc; padding:10px;'>" #ccc; padding:10px;'>" # Note: this section is described uniformly.
+                html_output += f"<h3>Text {i+1}</h3><div style='border:1px solid #ccc; padding:10px;'>"
                 for token, score in text_importance:
                     color = "green" if score > 0.5 else ("red" if score < 0.3 else "black")
                     html_output += f"<span style='color:{color}; font-weight:{score*100}'> {token} </span>"
