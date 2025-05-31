@@ -44,6 +44,8 @@ import sys
 import platform
 import psutil
 import threading
+from resource_monitor import ResourceMonitor
+
 
 try:
     import pynvml
