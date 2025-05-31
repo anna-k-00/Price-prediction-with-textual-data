@@ -12,6 +12,8 @@ import re
 import h3
 import json
 from typing import Dict, Optional
+from ANN import ANNRegressor
+
 
 import nltk
 nltk.download('punkt_tab')
