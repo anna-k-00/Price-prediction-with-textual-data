@@ -103,7 +103,9 @@ Folder with datasets and experiment results in non-MLFlow forms. Since the MLflo
   c.	raw_data_parsed_desc_preprocessed_full_april.csv - same as 1.a for data parsed in April
   
   d.	Results_pca – folder with main course of experiments results (chapter 5.1) in non-MLFlow format. Next is the pseudo structure for simplicity
+  
     i.	XGBR – folder with model results 
+    
       1.	metrics (store values for last runs of experiments for each combination of each feature_set x embedding techniques)
       
         a.	cv metrics 
@@ -118,9 +120,14 @@ Folder with datasets and experiment results in non-MLFlow forms. Since the MLflo
         
       2.	csv files with aggregate metrics
       3.	log file for experiments
+      
     ii.	ANN same as 1.d.i for another model
+    
     iii.	LinearSVR same as 1.d.i for another model
+    
     iv.	RFR same as 1.d.i for another model
+    
+
   e.	manual_text_features_negative same as 1.d, but for additional experiments with negative manual features with XGBoost
   
   f.	manual_text_features same as 1.d, but for additional experiments with all manual features with XGBoost
