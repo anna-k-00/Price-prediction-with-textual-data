@@ -46,12 +46,12 @@ import psutil
 import threading
 
 
-from ANN import ANNRegressor
+from ann import ANNRegressor
 from preprocessors.preprocessor_params_hex import DataProcessingPipeline
 
-from embeddings_generation.rubert_fine_tuning import RuBertTiny2Embedder
-from embeddings_generation.tfidf_generator import TfidfTransformer
-from embeddings_generation.w2v_generator import Word2VecTransformer
+from embeddings_generation.rubert_transformer import RuBertTiny2Embedder
+from embeddings_generation.tfidf_transformer import TfidfTransformer
+from embeddings_generation.w2v_transformer import Word2VecTransformer
 from resource_monitor import ResourceMonitor 
 
 
