@@ -1,35 +1,35 @@
 # Repository structure #
 
 1.	embeddings generation – modules for embeddings creation. Used in test_pipeline.py (main experiment module) and predict.py (class for model deployment and prediction on new data – here used for loading).
-  a.	gate.py – unused module with gating nn over rubert embeddings
-  b.	rubert_transformer.py – module for ruBerty-tiny-2 transformer learning fully
-  c.	tfidf_transformer.py  - module for tfidf implementation
-  d.	w2v_transformer.py- module for tfidf implementation
+    a.	gate.py – unused module with gating nn over rubert embeddings
+    b.	rubert_transformer.py – module for ruBerty-tiny-2 transformer learning fully
+    c.	tfidf_transformer.py  - module for tfidf implementation
+    d.	w2v_transformer.py- module for tfidf implementation
 2.	preprocessors - modules for preprocessing parsed data. Used in test_pipeline.py and predict.py
-  a.	preprocessor_params_hex.py – preprocessor for non-textual data. Used in both test_pipeline and predict
-  b.	preprocessor_text.py - preprocessor for textual data. Not integrated to test_pipeline and predict, as used for in-advanced preprocessing (less time consuming)
+    a.	preprocessor_params_hex.py – preprocessor for non-textual data. Used in both test_pipeline and predict
+    b.	preprocessor_text.py - preprocessor for textual data. Not integrated to test_pipeline and predict, as used for in-advanced preprocessing (less time consuming)
 3.	main methods – methods for models learning, saving and deploying. Also used for practical application of models
-  a.	ann.py – our naïve neural network for price prediction tasks
-  b.	fraud_detection.py – naïve method for fraud detection with the use of predicted vs actual prices
-  c.	resource_monitor.py – supply method for resource monitoring during test loops to log them in MLflow
-  d.	test_pipeline.py – main module for testing models’ hyperparameters, fitting, assessing and saving them (in MLflow and model regitry). Also contains methods for loading models’ components in a propper way
-  e.	predict.py – main module for models’ deployment with following usage for prediction tasks. Interracted with test_pipeline methods for models search in MLflow and their loading
+    a.	ann.py – our naïve neural network for price prediction tasks
+    b.	fraud_detection.py – naïve method for fraud detection with the use of predicted vs actual prices
+    c.	resource_monitor.py – supply method for resource monitoring during test loops to log them in MLflow
+    d.	test_pipeline.py – main module for testing models’ hyperparameters, fitting, assessing and saving them (in MLflow and model regitry). Also contains methods for loading models’ components in a propper way
+    e.	predict.py – main module for models’ deployment with following usage for prediction tasks. Interracted with test_pipeline methods for models search in MLflow and their loading
 4.	experiments – folder with supplementary materials needed for experiments conduction
-  a.	manual_text_features_full.json – manual features dictionary used for searching Boolean parameters presented in text 
-  b.	manual_text_features_negative. json – same as 4.a but only has potentially strongly affecting negative keys
-  c.	uniques_dict.json – dictionary with unique value in categorical columns in initial dataset. Used for checking if any new values appeared in test_pipeline.py method for initial dataset validation
-  d.	sample_300.csv – short sample dataset which can be used for testing test_pipeline.py 
+    a.	manual_text_features_full.json – manual features dictionary used for searching Boolean parameters presented in text 
+    b.	manual_text_features_negative. json – same as 4.a but only has potentially strongly affecting negative keys
+    c.	uniques_dict.json – dictionary with unique value in categorical columns in initial dataset. Used for checking if any new values appeared in test_pipeline.py method for initial dataset validation
+    d.	sample_300.csv – short sample dataset which can be used for testing test_pipeline.py 
 5.	samples – folder with notebooks showing how to interact with modules. Has information on how to import and use them properly. Allow repeating all the code-connected operations in this paper (including experiments evaluation) 
-  a.	EDA + feature importance.ipynb – notebook presenting code for chapter 3 with EDA stage. Not interacted to GoogleDrive datasets and folders directly.
-  b.	 parsing.ipynb - notebook presenting code for parsing new dataset. Also includes application of preprocessor_text.py before saving datasets for further usage. Attention: parser is not working from google Collaboratory. Better to use locally.
-  c.	experiments_5_1_results_processing.ipynb – notebook illustrating all the code for experiments in chapter 5.1 (after all the experiments have been conducted). Offers integration with our results of experiments available in GoogleDrive with all the aggregation tables creation and statistical tests conducted. The instructions on how to use GoogleDrive files are also presented there.
-  d.	experiments_5_2.ipynb– notebook storing all the code for experiments in chapter 5.2, including the deployment of modeule and its usage on new datasets for may and april, plus all the historical data from tests in chapter 5.1. Offers integration with our results of experiments available in GoogleDrive with all the aggregation tables creation and statistical tests conducted. The instructions on how to use GoogleDrive files are also presented there.
-  e.	experiments_initiation.ipynb - notebook presenting all the code for experiment initiation. Has 2 parts: one is for quick testing (small datatset, less iterations); and another one is for full reproductibility of our experiments (including parameters and datset). The instructions on how to use GoogleDrive file with full march data for tests is also available.
-  f.	model_deploy.ipynb notebook showing how to deploy the model with our modules and apply it to predict new prices. Fully integrated with our MLFlow GoogleDrive folder (can be accessed through Google collab) and new datasets available for tests. Includes all the instructions to access the files. Also illustrates how to apply fraud_detection.py to new prediction and shows sample results
+    a.	EDA + feature importance.ipynb – notebook presenting code for chapter 3 with EDA stage. Not interacted to GoogleDrive datasets and folders directly.
+    b.	 parsing.ipynb - notebook presenting code for parsing new dataset. Also includes application of preprocessor_text.py before saving datasets for further usage. Attention: parser is not working from google Collaboratory. Better to use locally.
+    c.	experiments_5_1_results_processing.ipynb – notebook illustrating all the code for experiments in chapter 5.1 (after all the experiments have been conducted). Offers integration with our results of experiments available in GoogleDrive with all the aggregation tables creation and statistical tests conducted. The instructions on how to use GoogleDrive files are also presented there.
+    d.	experiments_5_2.ipynb– notebook storing all the code for experiments in chapter 5.2, including the deployment of modeule and its usage on new datasets for may and april, plus all the historical data from tests in chapter 5.1. Offers integration with our results of experiments available in GoogleDrive with all the aggregation tables creation and statistical tests conducted. The instructions on how to use GoogleDrive files are also presented there.
+    e.	experiments_initiation.ipynb - notebook presenting all the code for experiment initiation. Has 2 parts: one is for quick testing (small datatset, less iterations); and another one is for full reproductibility of our experiments (including parameters and datset). The instructions on how to use GoogleDrive file with full march data for tests is also available.
+    f.	model_deploy.ipynb notebook showing how to deploy the model with our modules and apply it to predict new prices. Fully integrated with our MLFlow GoogleDrive folder (can be accessed through Google collab) and new datasets available for tests. Includes all the instructions to access the files. Also illustrates how to apply fraud_detection.py to new prediction and shows sample results  
 6.	Non-folder files
-  a.	parser_avito.py – module for parsing 
-  b.	requirements.txt – file with all the python dependencis specified to fully reproduce all the code sections
-  c.	standard README.MD
+    a.	parser_avito.py – module for parsing 
+    b.	requirements.txt – file with all the python dependencis specified to fully reproduce all the code sections
+    c.	standard README.MD
 
 # Google Drive #
 
