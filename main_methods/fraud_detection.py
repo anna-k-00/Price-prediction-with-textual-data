@@ -45,17 +45,3 @@ class RealEstateAnalyzer:
     def get_processed_data(self):
         """Возвращает все обработанные данные"""
         return self.df
-
-
-analyzer = RealEstateAnalyzer(df)
-
-# Получаем данные
-fraudulent = analyzer.fraud()
-suspicious = analyzer.suspicious()
-
-# Путь для сохранения
-save_path = "/content/drive/MyDrive/thesis/"
-
-# Сохраняем как CSV
-fraudulent.to_csv(f"{save_path}fraudulent_ads.csv", index=False)
-suspicious.to_csv(f"{save_path}suspicious_ads.csv", index=False)
