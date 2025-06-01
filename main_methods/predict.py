@@ -44,6 +44,9 @@ import sys
 import platform
 import psutil
 import threading
+from test_pipeline import PricePredictionExperiment
+
+
 
 try:
     import pynvml
